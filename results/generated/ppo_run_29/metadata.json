@@ -1,0 +1,21 @@
+{
+    "run_id": "ppo_run_29",
+    "timestamp": "2025-09-04T22:37:04+09:00",
+    "experiment_type": "lhs_distributed_ppo_training",
+    "lhs_sample_id": 29,
+    "network_config": {'scenario': 'light', 'delay_ms': 10, 'loss_pct': 0.8709453872293338, 'bandwidth_mbps': 50},
+    "workload_config": {'RATE': 71, 'BATCH': 1, 'QOS': 0, 'PAYLOAD_BYTES': 256, 'PUB_COUNT': 20, 'SUB_COUNT': 9, 'DURATION': 188},
+    "eda_config": {'HI_RTT_US': 4939266, 'LO_RTT_US': 3939292, 'T_HOLD_ON': 0.44, 'T_HOLD_OFF': 0.83, 'INTERVAL_S': 0.55, 'CONTROL_MIN_SEC': 0.55, 'CTRL_RATE': 9, 'CTRL_BATCH': 8, 'EWMA_ALPHA': 0.424, 'TH_RETRANS': 2, 'TH_SNDBUF': 534468, 'TH_RCVBUF': 534468, 'SND_RATIO_HI': 0.769, 'SND_RATIO_LO': 0.538, 'USE_ADAPTIVE': 1, 'SAMPLE_ID': 29, 'LHS_COORDS': [0.9877, 0.0538, 0.4288, 0.7813, 0.8109, 0.7045, 0.4397, 0.277, 0.7993]},
+    "infrastructure": {
+        "broker_host": "192.168.0.1",
+        "publisher_host": "192.168.0.2",
+        "subscriber_host": "192.168.0.3",
+        "broker_port": 23232,
+        "control_topic": "control/room1"
+    },
+    "data_collection": {
+        "subscriber_csv_expected": 9,
+        "eda_log_path": "eda_ppo_run_29.jsonl",
+        "duration_sec": 188
+    }
+}

@@ -1,0 +1,6 @@
+/home/sslab/jinuk/clients/publisher.py:25: DeprecationWarning: Callback API version 1 is deprecated, update to latest version
+  client = mqtt.Client(client_id="pub-room1")
+/home/sslab/jinuk/clients/publisher.py:25: DeprecationWarning: Callback API version 1 is deprecated, update to latest version
+  client = mqtt.Client(client_id="pub-room1")
+/home/sslab/jinuk/clients/publisher.py:25: DeprecationWarning: Callback API version 1 is deprecated, update to latest version
+  client = mqtt.Client(client_id="pub-room1")

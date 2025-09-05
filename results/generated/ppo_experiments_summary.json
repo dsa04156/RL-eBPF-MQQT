@@ -1,0 +1,1294 @@
+{
+  "timestamp": "2025-09-05T10:19:59.591133",
+  "summary_statistics": {
+    "total_experiments": 200,
+    "completed_experiments": 180,
+    "completion_rate": 90.0,
+    "total_csv_files": 1811,
+    "total_measurements": 51097815,
+    "avg_measurements_per_exp": 283876.75,
+    "ebpf_logs_count": 182,
+    "publisher_experiments": 180
+  },
+  "experiment_details": {
+    "ppo_run_4": {
+      "csv_count": 9,
+      "measurements": 99358,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_47": {
+      "csv_count": 10,
+      "measurements": 265490,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_67": {
+      "csv_count": 9,
+      "measurements": 342765,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_144": {
+      "csv_count": 11,
+      "measurements": 440480,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_188": {
+      "csv_count": 11,
+      "measurements": 227435,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_137": {
+      "csv_count": 10,
+      "measurements": 284820,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_27": {
+      "csv_count": 12,
+      "measurements": 411360,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_32": {
+      "csv_count": 9,
+      "measurements": 245619,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_75": {
+      "csv_count": 12,
+      "measurements": 293472,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_116": {
+      "csv_count": 12,
+      "measurements": 126695,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_55": {
+      "csv_count": 12,
+      "measurements": 147842,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_57": {
+      "csv_count": 12,
+      "measurements": 341160,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_161": {
+      "csv_count": 9,
+      "measurements": 247230,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_14": {
+      "csv_count": 9,
+      "measurements": 145970,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_165": {
+      "csv_count": 8,
+      "measurements": 214824,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_171": {
+      "csv_count": 11,
+      "measurements": 369537,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_49": {
+      "csv_count": 9,
+      "measurements": 248838,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_92": {
+      "csv_count": 8,
+      "measurements": 43424,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_39": {
+      "csv_count": 11,
+      "measurements": 420662,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_197": {
+      "csv_count": 8,
+      "measurements": 269560,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_52": {
+      "csv_count": 10,
+      "measurements": 283900,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_169": {
+      "csv_count": 10,
+      "measurements": 231370,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_166": {
+      "csv_count": 8,
+      "measurements": 197491,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_19": {
+      "csv_count": 11,
+      "measurements": 297155,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_134": {
+      "csv_count": 12,
+      "measurements": 463997,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_112": {
+      "csv_count": 11,
+      "measurements": 371965,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_172": {
+      "csv_count": 12,
+      "measurements": 466800,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_46": {
+      "csv_count": 12,
+      "measurements": 478512,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_198": {
+      "csv_count": 12,
+      "measurements": 454968,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_98": {
+      "csv_count": 9,
+      "measurements": 294039,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_111": {
+      "csv_count": 11,
+      "measurements": 296739,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_45": {
+      "csv_count": 12,
+      "measurements": 378265,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_18": {
+      "csv_count": 10,
+      "measurements": 115811,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_7": {
+      "csv_count": 8,
+      "measurements": 287968,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_34": {
+      "csv_count": 8,
+      "measurements": 247912,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_63": {
+      "csv_count": 9,
+      "measurements": 370566,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_192": {
+      "csv_count": 8,
+      "measurements": 294984,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_79": {
+      "csv_count": 11,
+      "measurements": 372479,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_107": {
+      "csv_count": 9,
+      "measurements": 323343,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_21": {
+      "csv_count": 10,
+      "measurements": 320520,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_117": {
+      "csv_count": 10,
+      "measurements": 324837,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_22": {
+      "csv_count": 9,
+      "measurements": 455926,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_35": {
+      "csv_count": 8,
+      "measurements": 211936,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_69": {
+      "csv_count": 10,
+      "measurements": 303720,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_74": {
+      "csv_count": 8,
+      "measurements": 63410,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_104": {
+      "csv_count": 9,
+      "measurements": 70322,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_102": {
+      "csv_count": 12,
+      "measurements": 334008,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_6": {
+      "csv_count": 8,
+      "measurements": 101458,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_78": {
+      "csv_count": 12,
+      "measurements": 115301,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_83": {
+      "csv_count": 8,
+      "measurements": 291161,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_80": {
+      "csv_count": 12,
+      "measurements": 100563,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_196": {
+      "csv_count": 10,
+      "measurements": 329120,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_147": {
+      "csv_count": 12,
+      "measurements": 432852,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_44": {
+      "csv_count": 12,
+      "measurements": 443712,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_91": {
+      "csv_count": 10,
+      "measurements": 242940,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_190": {
+      "csv_count": 10,
+      "measurements": 321890,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_151": {
+      "csv_count": 8,
+      "measurements": 216628,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_193": {
+      "csv_count": 11,
+      "measurements": 297627,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_95": {
+      "csv_count": 10,
+      "measurements": 305150,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_174": {
+      "csv_count": 8,
+      "measurements": 222040,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_13": {
+      "csv_count": 8,
+      "measurements": 261344,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_42": {
+      "csv_count": 11,
+      "measurements": 129312,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_26": {
+      "csv_count": 11,
+      "measurements": 424413,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_101": {
+      "csv_count": 9,
+      "measurements": 237946,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_168": {
+      "csv_count": 10,
+      "measurements": 336500,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_191": {
+      "csv_count": 11,
+      "measurements": 256528,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_133": {
+      "csv_count": 10,
+      "measurements": 291200,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_152": {
+      "csv_count": 9,
+      "measurements": 89909,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_194": {
+      "csv_count": 9,
+      "measurements": 242082,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_153": {
+      "csv_count": 8,
+      "measurements": 214112,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_48": {
+      "csv_count": 8,
+      "measurements": 358376,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_25": {
+      "csv_count": 12,
+      "measurements": 376024,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_115": {
+      "csv_count": 9,
+      "measurements": 323829,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_167": {
+      "csv_count": 8,
+      "measurements": 82831,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_50": {
+      "csv_count": 10,
+      "measurements": 187032,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_135": {
+      "csv_count": 10,
+      "measurements": 400170,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_136": {
+      "csv_count": 12,
+      "measurements": 179530,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_105": {
+      "csv_count": 11,
+      "measurements": 289795,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_82": {
+      "csv_count": 11,
+      "measurements": 520366,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_2": {
+      "csv_count": 12,
+      "measurements": 422316,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_154": {
+      "csv_count": 12,
+      "measurements": 319188,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_66": {
+      "csv_count": 10,
+      "measurements": 421040,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_143": {
+      "csv_count": 9,
+      "measurements": 238090,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_93": {
+      "csv_count": 12,
+      "measurements": 375936,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_81": {
+      "csv_count": 12,
+      "measurements": 132477,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_189": {
+      "csv_count": 9,
+      "measurements": 252963,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_31": {
+      "csv_count": 9,
+      "measurements": 267030,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_160": {
+      "csv_count": 12,
+      "measurements": 410280,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_114": {
+      "csv_count": 10,
+      "measurements": 447330,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_5": {
+      "csv_count": 9,
+      "measurements": 211938,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_77": {
+      "csv_count": 12,
+      "measurements": 310500,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_139": {
+      "csv_count": 12,
+      "measurements": 232850,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_86": {
+      "csv_count": 8,
+      "measurements": 98752,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_11": {
+      "csv_count": 9,
+      "measurements": 297009,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_20": {
+      "csv_count": 12,
+      "measurements": 320508,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_100": {
+      "csv_count": 12,
+      "measurements": 421968,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_148": {
+      "csv_count": 10,
+      "measurements": 118753,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_24": {
+      "csv_count": 9,
+      "measurements": 476582,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_9": {
+      "csv_count": 10,
+      "measurements": 375270,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_10": {
+      "csv_count": 8,
+      "measurements": 118726,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_141": {
+      "csv_count": 9,
+      "measurements": 306378,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_132": {
+      "csv_count": 10,
+      "measurements": 406590,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_158": {
+      "csv_count": 12,
+      "measurements": 422688,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_29": {
+      "csv_count": 9,
+      "measurements": 330408,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_68": {
+      "csv_count": 8,
+      "measurements": 217632,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_40": {
+      "csv_count": 9,
+      "measurements": 309699,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_8": {
+      "csv_count": 11,
+      "measurements": 275869,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_15": {
+      "csv_count": 10,
+      "measurements": 132463,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_175": {
+      "csv_count": 9,
+      "measurements": 312100,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_149": {
+      "csv_count": 11,
+      "measurements": 320826,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_30": {
+      "csv_count": 10,
+      "measurements": 304010,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_120": {
+      "csv_count": 10,
+      "measurements": 411620,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_51": {
+      "csv_count": 12,
+      "measurements": 458976,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_97": {
+      "csv_count": 12,
+      "measurements": 390466,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_162": {
+      "csv_count": 8,
+      "measurements": 151277,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_70": {
+      "csv_count": 9,
+      "measurements": 346734,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_56": {
+      "csv_count": 8,
+      "measurements": 206037,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_71": {
+      "csv_count": 9,
+      "measurements": 296793,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_155": {
+      "csv_count": 8,
+      "measurements": 336240,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_170": {
+      "csv_count": 12,
+      "measurements": 781092,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_157": {
+      "csv_count": 10,
+      "measurements": 529014,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_163": {
+      "csv_count": 8,
+      "measurements": 118352,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_38": {
+      "csv_count": 12,
+      "measurements": 152711,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_16": {
+      "csv_count": 10,
+      "measurements": 283070,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_164": {
+      "csv_count": 9,
+      "measurements": 254611,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_140": {
+      "csv_count": 11,
+      "measurements": 264799,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_87": {
+      "csv_count": 10,
+      "measurements": 267340,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_90": {
+      "csv_count": 8,
+      "measurements": 166572,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_195": {
+      "csv_count": 9,
+      "measurements": 366174,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_108": {
+      "csv_count": 10,
+      "measurements": 280030,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_200": {
+      "csv_count": 11,
+      "measurements": 375628,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_118": {
+      "csv_count": 8,
+      "measurements": 263781,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_85": {
+      "csv_count": 8,
+      "measurements": 277848,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_131": {
+      "csv_count": 9,
+      "measurements": 72372,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_76": {
+      "csv_count": 12,
+      "measurements": 432276,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_106": {
+      "csv_count": 12,
+      "measurements": 113129,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_156": {
+      "csv_count": 9,
+      "measurements": 290835,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_146": {
+      "csv_count": 12,
+      "measurements": 203057,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_199": {
+      "csv_count": 10,
+      "measurements": 402430,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_61": {
+      "csv_count": 10,
+      "measurements": 399720,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_3": {
+      "csv_count": 12,
+      "measurements": 422796,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_28": {
+      "csv_count": 8,
+      "measurements": 190272,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_142": {
+      "csv_count": 12,
+      "measurements": 549804,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_43": {
+      "csv_count": 10,
+      "measurements": 298530,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_94": {
+      "csv_count": 9,
+      "measurements": 364047,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_109": {
+      "csv_count": 8,
+      "measurements": 214200,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_17": {
+      "csv_count": 12,
+      "measurements": 154371,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_12": {
+      "csv_count": 9,
+      "measurements": 307746,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_138": {
+      "csv_count": 9,
+      "measurements": 355005,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_72": {
+      "csv_count": 10,
+      "measurements": 221160,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_64": {
+      "csv_count": 8,
+      "measurements": 312704,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_65": {
+      "csv_count": 10,
+      "measurements": 136873,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_159": {
+      "csv_count": 12,
+      "measurements": 91048,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_54": {
+      "csv_count": 9,
+      "measurements": 228843,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_103": {
+      "csv_count": 8,
+      "measurements": 242246,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_110": {
+      "csv_count": 11,
+      "measurements": 394845,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_59": {
+      "csv_count": 11,
+      "measurements": 497266,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_23": {
+      "csv_count": 12,
+      "measurements": 124288,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_119": {
+      "csv_count": 10,
+      "measurements": 135669,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_96": {
+      "csv_count": 12,
+      "measurements": 252086,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_150": {
+      "csv_count": 10,
+      "measurements": 295940,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_84": {
+      "csv_count": 11,
+      "measurements": 119967,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_33": {
+      "csv_count": 8,
+      "measurements": 264512,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_177": {
+      "csv_count": 10,
+      "measurements": 229220,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_37": {
+      "csv_count": 10,
+      "measurements": 219902,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_60": {
+      "csv_count": 8,
+      "measurements": 325144,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_1": {
+      "csv_count": 17,
+      "measurements": 92336,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_36": {
+      "csv_count": 10,
+      "measurements": 279220,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_145": {
+      "csv_count": 9,
+      "measurements": 205848,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_173": {
+      "csv_count": 11,
+      "measurements": 450499,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_99": {
+      "csv_count": 12,
+      "measurements": 151006,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_89": {
+      "csv_count": 11,
+      "measurements": 133189,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_73": {
+      "csv_count": 11,
+      "measurements": 555016,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_176": {
+      "csv_count": 11,
+      "measurements": 201240,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_113": {
+      "csv_count": 10,
+      "measurements": 383930,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_41": {
+      "csv_count": 11,
+      "measurements": 243522,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_53": {
+      "csv_count": 11,
+      "measurements": 322784,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_62": {
+      "csv_count": 9,
+      "measurements": 80061,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_58": {
+      "csv_count": 8,
+      "measurements": 119562,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    },
+    "ppo_run_88": {
+      "csv_count": 10,
+      "measurements": 308740,
+      "has_metadata": true,
+      "has_ebpf": true,
+      "has_publisher": true
+    }
+  },
+  "analysis_metadata": {
+    "total_experiments_planned": 200,
+    "lhs_dimensions": 9,
+    "parameter_ranges": {
+      "rtt_range_ms": [
+        59,
+        4990
+      ],
+      "control_frequency_hz": [
+        1,
+        15
+      ],
+      "network_scenarios": [
+        "burst",
+        "moderate",
+        "severe"
+      ]
+    }
+  }
+}
