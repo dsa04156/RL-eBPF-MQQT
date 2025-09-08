@@ -2,7 +2,7 @@
 set -euo pipefail
 source "$(dirname "$0")/common.sh"
 IF=${1:-enp0s8}
-RATE=${2:-500kbit}
+RATE=2Mbit
 DELAY=${3:-50ms}
 LOSS=${4:-2%}
 
