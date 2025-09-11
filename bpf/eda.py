@@ -51,6 +51,7 @@ ADAPT_WIN    = int(os.getenv("ADAPT_WIN", "200"))      # 최근 샘플 개수
 MIN_RTT_HARD = 40_000  # 40ms: 적응형에서 최소 기준
 MAX_HI_CAP   = 120_000 # 120ms: HI 상한 캡
 
+total_msgs = 0
 
 BPF_PROGRAM = r"""
 #include <uapi/linux/ptrace.h>
@@ -164,6 +165,7 @@ def make_mqtt():
     return cli
 
 def main():
+    global total_msgs
     b = BPF(text=BPF_PROGRAM)
     print("[OK] eBPF loaded (MQTT:23232; srtt/retrans/sndbuf/rcvbuf)", flush=True)
     cli = make_mqtt()
@@ -197,7 +199,7 @@ def main():
         for k, v in table.items():
             key = (k.saddr, k.daddr, k.sport, k.dport)
             snapshot[key] = int(v.retrans)
-
+            total_msgs += 1
             rtt_ms = float(v.srtt_us) / 1000.0
             sndbuf = int(v.sndbuf)
             rcvbuf = int(v.rcvbuf)
@@ -217,7 +219,8 @@ def main():
                 "rtt_ms": round(rtt_ms, 2),
                 "retrans_delta": retrans_delta,
                 "sndbuf": sndbuf,
-                "rcvbuf": rcvbuf
+                "rcvbuf": rcvbuf,
+                "total_msgs": total_msgs
             }
             print(json.dumps(line), flush=True)  # JSONL 출력
 
