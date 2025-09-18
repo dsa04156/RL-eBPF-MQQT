@@ -1,2 +1,5 @@
 *.csv
 *.log
+*.jsonl
+*.pt
+*.out

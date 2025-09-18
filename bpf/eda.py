@@ -16,6 +16,7 @@ from paho.mqtt import client as mqtt
 MQTT_HOST = os.getenv("MQTT_HOST", "127.0.0.1")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "23232"))
 CONTROL_TOPIC = os.getenv("CONTROL_TOPIC", "control/room1")
+METRICS_TOPIC = os.getenv("METRICS_TOPIC", "eda/latency")  # subscriber가 보내는 앱 레벨 지연 통계
 OBSERVE = os.getenv("EDA_OBSERVE", "0") == "1"   # 1이면 관찰 전용(제어 발행 안 함)
 
 # 기본 임계(백업)
@@ -42,8 +43,19 @@ INTERVAL_S       = float(os.getenv("INTERVAL_S", "2.0"))     # eBPF 집계 주�
 CONTROL_MIN_SEC  = float(os.getenv("CONTROL_MIN_SEC", "2.0"))# 최소 제어 간격(쿨다운)
 
 # 제어 명령 파라미터 (퍼블리셔가 해석)
-CTRL_THROTTLE_RATE = int(os.getenv("CTRL_RATE", "5"))  # Hz
+CTRL_THROTTLE_RATE = int(os.getenv("CTRL_RATE", "5"))  # Hz (과거 절대 목표값)
 CTRL_BATCH_SIZE    = int(os.getenv("CTRL_BATCH", "5"))
+
+# 단계적 증감 제어 옵션(비RL 환경에서 부드럽게 제어)
+R_MIN = int(os.getenv("R_MIN", "1"))
+R_MAX = int(os.getenv("R_MAX", "200"))
+B_MIN = int(os.getenv("B_MIN", "1"))
+B_MAX = int(os.getenv("B_MAX", "32"))
+STEP_DOWN_FRAC_SEV = float(os.getenv("STEP_DOWN_FRAC_SEV", "0.30"))  # 심각 혼잡시 -30%
+STEP_DOWN_FRAC_MOD = float(os.getenv("STEP_DOWN_FRAC_MOD", "0.15"))  # 보통 혼잡시 -15%
+STEP_UP_FRAC       = float(os.getenv("STEP_UP_FRAC", "0.10"))        # 해제시 +10% (현재는 release 기본 사용)
+CTRL_BASE_RATE     = int(os.getenv("CTRL_BASE_RATE", "50"))           # 정상시 목표(퍼블리셔 기본)
+CTRL_BASE_BATCH    = int(os.getenv("CTRL_BASE_BATCH", "1"))
 
 # 적응형 임계(옵션)
 USE_ADAPTIVE = os.getenv("USE_ADAPTIVE", "0") == "1"
@@ -164,12 +176,38 @@ def make_mqtt():
     cli.loop_start()
     return cli
 
+# -------- 앱 레벨 지연 메트릭 수신 (옵션) --------
+LATEST_METRICS = {
+    "ts": None, "n": None, "window_sec": None,
+    "p50_ms": None, "p95_ms": None, "p99_ms": None,
+    "mean_ms": None, "total_msgs": None
+}
+
+def on_metrics(cli, userdata, msg):
+    try:
+        payload = json.loads(msg.payload)
+        for k in list(LATEST_METRICS.keys()):
+            if k in payload:
+                LATEST_METRICS[k] = payload[k]
+    except Exception as e:
+        print(json.dumps({"warn":"bad_metrics_payload","err":str(e)}), flush=True)
+
 def main():
     global total_msgs
     b = BPF(text=BPF_PROGRAM)
     print("[OK] eBPF loaded (MQTT:23232; srtt/retrans/sndbuf/rcvbuf)", flush=True)
     cli = make_mqtt()
+    # 앱 레벨 지연 메트릭 구독
+    try:
+        cli.message_callback_add(METRICS_TOPIC, on_metrics)
+        cli.subscribe(METRICS_TOPIC, qos=0)
+        print(json.dumps({"info":"subscribe_metrics","topic":METRICS_TOPIC}), flush=True)
+    except Exception as e:
+        print(json.dumps({"warn":"subscribe_metrics_failed","err":str(e)}), flush=True)
     last_congested_state = False
+    # 단계적 제어 현재 상태(초기값은 퍼블리셔 기본과 정렬 권장)
+    current_rate_cmd  = CTRL_BASE_RATE
+    current_batch_cmd = CTRL_BASE_BATCH
     prev_totals = {}           # flow별 누적 재전송 스냅샷
     last_ctrl_ts = 0.0         # 제어 스팸 방지(쿨다운)
 
@@ -282,42 +320,62 @@ def main():
             if not want_off:
                 off_since = None
 
-        # ---- 제어 발행 (쿨다운) ----
-        if not OBSERVE:
-            if congested != last_congested_state and (now - last_ctrl_ts) >= CONTROL_MIN_SEC:
-                if congested:
-                    # 단계형: 심각도에 따라 강/중/약
-                    severe = (ewma_rtt_us or 0) > 100_000 or (snd_ratio > 0.9) or (had_retrans and TH_RETRANS <= 1)
-                    moderate = (ewma_rtt_us or 0) > 70_000 or snd_ratio > 0.8 or had_retrans
+        # ---- 제어 발행 (쿨다운) : 단계적 증감 ----
+        if not OBSERVE and (now - last_ctrl_ts) >= CONTROL_MIN_SEC:
+            if congested:
+                severe = (ewma_rtt_us or 0) > 100_000 or (snd_ratio > 0.9) or (had_retrans and TH_RETRANS <= 1)
+                moderate = (ewma_rtt_us or 0) > 70_000 or snd_ratio > 0.8 or had_retrans
+                frac = STEP_DOWN_FRAC_SEV if severe else (STEP_DOWN_FRAC_MOD if moderate else 0.0)
 
-                    cmds = []
+                cmds = []
+                if frac > 0.0:
+                    new_rate = int(max(R_MIN, round(current_rate_cmd * (1.0 - frac))))
+                    bump = 2 if severe else (1 if moderate else 0)
+                    new_batch = int(min(B_MAX, max(B_MIN, current_batch_cmd + bump)))
+                    if new_rate != current_rate_cmd:
+                        cmds.append({"cmd": "throttle", "rate": new_rate})
+                        current_rate_cmd = new_rate
+                    if bump > 0 and new_batch != current_batch_cmd:
+                        cmds.append({"cmd": "batch", "size": new_batch})
+                        current_batch_cmd = new_batch
                     if severe:
-                        cmds.append({"cmd": "throttle", "rate": max(1, int(CTRL_THROTTLE_RATE/1))})
-                        cmds.append({"cmd": "batch",    "size": max(1, int(CTRL_BATCH_SIZE*2))})
-                        cmds.append({"cmd": "qos",      "level": 0})
-                    elif moderate:
-                        cmds.append({"cmd": "throttle", "rate": CTRL_THROTTLE_RATE})
-                        cmds.append({"cmd": "batch",    "size": max(1, CTRL_BATCH_SIZE)})
-                    else:
-                        cmds.append({"cmd": "batch",    "size": max(1, CTRL_BATCH_SIZE)})
-
+                        cmds.append({"cmd": "qos", "level": 0})
+                if cmds:
                     for c in cmds:
                         cli.publish(CONTROL_TOPIC, payload=json.dumps(c), qos=1)
+                    print(json.dumps({
+                        "ts": now, "congested": True, "ewma_rtt_us": ewma_rtt_us,
+                        "snd_ratio": round(snd_ratio,3), "rcv_ratio": round(rcv_ratio,3),
+                        "control": cmds, "current_rate_cmd": current_rate_cmd,
+                        "current_batch_cmd": current_batch_cmd
+                    }), flush=True)
                     last_ctrl_ts = now
-                    print(json.dumps({"ts": now, "congested": True, "ewma_rtt_us": ewma_rtt_us,
-                                    "snd_ratio": round(snd_ratio,3), "rcv_ratio": round(rcv_ratio,3),
-                                    "control": cmds}), flush=True)
-                else: # ADDED: 혼잡 해제 로직
-                    # 기본값으로 복귀하라는 명령 (rate: -1, size: -1 등을 약속)
-                    release_cmd = {"cmd": "release", "defaults": {"rate": -1, "batch": -1, "qos": 1}}
-                    print(json.dumps({"ts": now, "status": "STABLE", "control": release_cmd}), flush=True)
-                    cli.publish(CONTROL_TOPIC, payload=json.dumps(release_cmd), qos=1)
-
+            else:
+                # 혼잡 해제: 기본 복귀(release)
+                release_cmd = {"cmd": "release", "defaults": {"rate": -1, "batch": -1, "qos": 1}}
+                cli.publish(CONTROL_TOPIC, payload=json.dumps(release_cmd), qos=1)
+                print(json.dumps({"ts": now, "status": "STABLE", "control": release_cmd}), flush=True)
+                current_rate_cmd, current_batch_cmd = CTRL_BASE_RATE, CTRL_BASE_BATCH
                 last_ctrl_ts = now
-                last_congested_state = congested # 상태 업데이트
+            last_congested_state = congested
 
         # 다음 라운드를 위해 스냅샷 보관
         prev_totals = snapshot
+
+        # 앱 레벨 지연 메트릭 스냅샷도 주기적으로 출력(1회)
+        ms = {k: LATEST_METRICS.get(k) for k in ["ts","n","window_sec","p50_ms","p95_ms","p99_ms","mean_ms","total_msgs"]}
+        freshness = None
+        try:
+            if ms.get("ts") and ms.get("window_sec"):
+                freshness = now - float(ms["ts"])
+        except Exception:
+            pass
+        print(json.dumps({
+            "ts": now,
+            "metrics": ms,
+            "metrics_fresh_sec": round(freshness,3) if isinstance(freshness,(int,float)) else None,
+            "source": "subscriber_metrics"
+        }), flush=True)
 
 if __name__ == "__main__":
     try:
