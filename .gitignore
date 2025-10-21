@@ -3,3 +3,37 @@
 *.jsonl
 *.pt
 *.out
+# ignore
+*.pt
+*.onnx
+*.zip
+.npz
+# build outputs
+dist/
+build/
+*.log
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.env
+
+# data / models
+*.pt
+*.onnx
+*.h5
+*.csv
+*.zip
+*.tar
+*.mp4
+
+# IDE
+.vscode/
+.idea/
+.zip
+.csv
+
+
+# results are large
+results/*.jsonl
