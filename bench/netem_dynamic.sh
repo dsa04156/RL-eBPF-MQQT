@@ -15,7 +15,7 @@ set -euo pipefail
 
 IF=${IF:-enp0s8}
 PHASE_DUR=${PHASE_DUR:-30}
-CYCLES=${CYCLES:-1}
+CYCLES=${CYCLES:-3}
 
 log() { echo "[netem-dyn] $(date +%T) $*" >&2; }
 

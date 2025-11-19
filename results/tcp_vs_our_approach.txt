@@ -1,0 +1,25 @@
+
+TCP Congestion Control vs 우리 방법
+====================================
+
+핵심 차이:
+
+TCP:
+- Reactive (패킷 손실 후 반응)
+- 전송 속도 제어 (cwnd)
+- 네트워크 계층만 관찰
+- Per-flow 제어
+
+우리:
+- Proactive (징후 감지 후 사전 조치)
+- 생성 속도 제어 (rate limiting)
+- 응용 계층 SLO 고려
+- End-to-end 최적화
+
+결과:
+TCP만: P99 50초 (buffer 큐잉)
+TCP+우리: P99 0.8초 (사전 방지)
+
+기여:
+커널 신호를 활용한 응용 계층 proactive rate control
+→ TCP와 협력하여 e2e latency 최적화

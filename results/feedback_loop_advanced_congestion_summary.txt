@@ -1,0 +1,11 @@
+Lagged Cross-Correlation Summary
+Log: logs/torch_model_experiments/congestion/rl_bc_v2_congestion.jsonl
+P99 vs Retrans: lag=-15, r=nan
+RTT vs Retrans: lag=-15, r=nan
+P99 vs Throughput (alt): lag=4, r=0.729
+
+P99 Burst Event Stats (5-step pre/post)
+Events: 8
+Retrans pre=1.0000, post=1.0000, p=nan
+RTT    pre=198.77, post=144.62
+Thr    pre=113.27, post=105.24

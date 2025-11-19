@@ -13,6 +13,7 @@ import numpy as np
 from pathlib import Path
 import glob
 import matplotlib.pyplot as plt
+import argparse
 
 class PPOResultsAnalyzer:
     def __init__(self, results_path="/home/sslab/mqtt-ebpf-edge/results/generated"):
@@ -190,26 +191,117 @@ class PPOResultsAnalyzer:
         print(f"\n💾 집계 데이터 저장: {output_file}")
         return output_file
 
+def analyze_jsonl_log(log_path: Path, show_summary: bool, plot_path: Path | None):
+    """단일 JSONL 로그(예: logs/ppo_train.jsonl)를 읽어 reward/p99/throughput 통계를 출력"""
+    records = []
+    with open(log_path, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            reward = entry.get("r")
+            metrics = entry.get("metrics", {}) or {}
+            throughput = None
+            n = metrics.get("n")
+            win = metrics.get("window_sec")
+            if isinstance(n, (int, float)) and isinstance(win, (int, float)) and win > 0:
+                throughput = float(n) / float(win)
+
+            if isinstance(reward, (int, float)):
+                records.append(
+                    {
+                        "ts": entry.get("ts"),
+                        "reward": float(reward),
+                        "p99": metrics.get("p99_ms"),
+                        "p95": metrics.get("p95_ms"),
+                        "throughput": throughput,
+                    }
+                )
+
+    if not records:
+        raise ValueError(f"No numeric rewards found in {log_path}")
+
+    df = pd.DataFrame(records).sort_values(by="ts")
+
+    if show_summary:
+        print(f"\n📊 로그 요약 ({log_path}):")
+        print(f"  샘플 수: {len(df)}")
+        print(
+            f"  reward min/mean/max: "
+            f"{df['reward'].min():.3f} / {df['reward'].mean():.3f} / {df['reward'].max():.3f}"
+        )
+        if df["p99"].notna().any():
+            print(
+                f"  p99  min/mean/max: "
+                f"{df['p99'].min():.3f} / {df['p99'].mean():.3f} / {df['p99'].max():.3f}"
+            )
+        if df["throughput"].notna().any():
+            print(
+                f"  TPS  min/mean/max: "
+                f"{df['throughput'].min():.2f} / {df['throughput'].mean():.2f} / {df['throughput'].max():.2f}"
+            )
+
+    if plot_path:
+        plt.figure(figsize=(10, 4))
+        plt.plot(df["ts"], df["reward"], label="reward", linewidth=1)
+        plt.xlabel("timestamp")
+        plt.ylabel("reward")
+        plt.title(f"Reward trend ({log_path.name})")
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plot_path.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(plot_path)
+        plt.close()
+        print(f"📷 reward plot saved to {plot_path}")
+
+
 def main():
+    parser = argparse.ArgumentParser(description="PPO 결과/로그 분석 도구")
+    parser.add_argument(
+        "--ppo",
+        help="JSONL 로그 경로 (예: logs/ppo_train.jsonl). 지정하면 로그 요약 모드로 동작",
+    )
+    parser.add_argument(
+        "--summary",
+        action="store_true",
+        help="--ppo 사용 시 reward/p99 요약 통계를 출력",
+    )
+    parser.add_argument(
+        "--plot",
+        help="--ppo 사용 시 reward 추세 그래프를 저장할 경로 (PNG)",
+    )
+    args = parser.parse_args()
+
+    if args.ppo:
+        log_path = Path(args.ppo).expanduser()
+        plot_path = Path(args.plot).expanduser() if args.plot else None
+        analyze_jsonl_log(log_path, show_summary=args.summary, plot_path=plot_path)
+        return
+
     print("🚀 PPO 실험 결과 종합 분석 시작...")
-    
+
     analyzer = PPOResultsAnalyzer()
-    
+
     # 1. 실험 데이터 스캔
     summary = analyzer.scan_experiments()
-    
+
     # 2. 요약 보고서 생성
     analyzer.generate_summary_report()
-    
+
     # 3. 성능 분포 분석
     analyzer.analyze_performance_distribution()
-    
+
     # 4. PPO 데이터셋 정보
     analyzer.prepare_ppo_dataset_info()
-    
+
     # 5. 집계 데이터 저장
     analyzer.save_aggregated_data()
-    
+
     print(f"\n🎯 === 분석 완료 ===")
     print(f"완료된 실험: {summary['completed_experiments']}/{summary['total_experiments']}")
     print(f"수집된 측정값: {summary['total_measurements']:,}개")

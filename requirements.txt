@@ -1,2 +1,3 @@
 gymnasium>=0.29
 numpy>=1.23
+torch>=2.0.0  # PPO 강화학습에 필요
