@@ -73,6 +73,14 @@ THROUGHPUT_ABS_WEIGHT = float(os.getenv("THROUGHPUT_ABS_WEIGHT", "0.3"))
 THROUGHPUT_ABS_SCALE  = float(os.getenv("THROUGHPUT_ABS_SCALE",  "100.0"))  # msg/s 기준 스케일
 P99_PENALTY_WEIGHT = float(os.getenv("P99_PENALTY_WEIGHT", "6.0"))
 ACCEL_P99_GUARD_FRAC = float(os.getenv("ACCEL_P99_GUARD_FRAC", "0.05"))
+P99_TREND_MIN_MS = float(os.getenv("P99_TREND_MIN_MS", "5000"))
+HARD_DECEL_FRAC = float(os.getenv("HARD_DECEL_FRAC", "0.2"))
+P99_ACCEL_BLOCK_MS = float(os.getenv("P99_ACCEL_BLOCK_MS", "5000"))
+P99_ACCEL_BLOCK_COUNT = int(os.getenv("P99_ACCEL_BLOCK_COUNT", "3"))
+P99_SUSTAIN_DECEL_FRAC = float(os.getenv("P99_SUSTAIN_DECEL_FRAC", "0.05"))
+P99_STOP_MS = float(os.getenv("P99_STOP_MS", "20000"))
+P99_STOP_COUNT = int(os.getenv("P99_STOP_COUNT", "3"))
+P99_STOP_RELEASE_MS = float(os.getenv("P99_STOP_RELEASE_MS", "5000"))
 
 # eBPF 집계/임계/평활
 INTERVAL_S  = float(os.getenv("INTERVAL_S", "2.0"))
@@ -397,18 +405,10 @@ def make_state(ewma_rtt_us, snd_ratio, rcv_ratio, had_retrans, queue_pressure,
     rate_norm = clamp(current_rate/float(R_MAX), 0.0, 1.0)
     batch_norm= clamp(current_batch/float(B_MAX), 0.0, 1.0)
     drate     = clamp(last_action.get("d_rate", 0.0), -1.0, 1.0)
-    dbatch    = clamp(last_action.get("d_batch", 0), -3, 3)/3.0
+    # dbatch    = clamp(last_action.get("d_batch", 0), -3, 3)/3.0
+    dbatch = 0.0 # Force batch size to be fixed (simplify learning)
 
-    p99_norm = 0.0
-    if isinstance(metrics, dict):
-        try:
-            p99_val = metrics.get("p99_ms")
-            if isinstance(p99_val, (int, float)):
-                p99_norm = clamp(p99_val / max(1.0, SLO_P99_MS), 0.0, 20.0)
-        except Exception:
-            p99_norm = 0.0
-
-    return [rtt_norm, s_norm, r_norm, retr_norm, cong_norm, rate_norm, batch_norm, drate, dbatch, p99_norm]
+    return [rtt_norm, s_norm, r_norm, retr_norm, cong_norm, rate_norm, batch_norm, drate, dbatch]
 
 def compute_throughput(metrics):
     # AGG에서 thr를 넘겨주면 그걸 우선 사용
@@ -421,83 +421,73 @@ def compute_throughput(metrics):
     return float(n)/float(win)
 
 
-def compute_reward(metrics,
-                   *,
-                   ewma_rtt_us,
-                   snd_ratio,
-                   rcv_ratio,
-                   queue_pressure,
-                   had_retrans,
-                   current_rate,
-                   SLO_p99_ms):
-    """
-    SLO 넘었는지 여부는 무시하고,
-    - p99/RTT/큐/버퍼는 낮을수록 좋게
-    - 처리량은 높을수록 좋게
-    완전 연속형 보상으로 설계.
-    """
 
+def compute_reward(
+    metrics,
+    *,
+    ewma_rtt_us,
+    snd_ratio,
+    rcv_ratio,
+    queue_pressure,
+    had_retrans,
+    retrans_count,
+    current_rate,
+    SLO_p99_ms,  # 시그니처 맞추기용, 내부에서 안 씀
+):
+    """
+    New Reward Policy: Throughput Maximization with Kernel Constraints
+    - Goal: Maximize throughput
+    - Constraints: Strong penalty for retrans/queue explosion/high RTT
+    - P99 is NOT used in reward (only for evaluation/shield)
+    """
     import math
 
-    # ------------ 1) 메트릭 가져오기 ------------
-    p99 = None
-    thr = None
-    if isinstance(metrics, dict):
-        try:
-            p99 = metrics.get("p99_ms")
-        except Exception:
-            p99 = None
-        thr = compute_throughput(metrics)
+    if not isinstance(metrics, dict):
+        return 0.0
 
-    # ------------ 2) 스케일(단위 맞추기) ------------
-    # 여기서 SLO_p99_ms는 "스케일"로만 쓰고, 기준(컷오프)로 안 쓴다.
-    # 그냥 p99를 0~몇 배 정도로 압축하기 위한 값일 뿐.
-    lat_scale = max(SLO_p99_ms, 1.0)          # 단위 정규화용
-    thr_scale = max(THROUGHPUT_ABS_SCALE, 1.0)  # 이미 env에서 쓰는 값 재활용
+    # 1) Throughput term (The Protagonist)
+    thr = compute_throughput(metrics) or 0.0
+    # Reference throughput (approx. normal level)
+    # If THROUGHPUT_TARGET is not defined, default to 1500
+    target = 1500.0
+    if 'THROUGHPUT_TARGET' in globals():
+        target = max(globals()['THROUGHPUT_TARGET'], 1.0)
+    
+    # 1) Throughput term (Main Objective)
+    # Logarithmic reward: incentivizes increase but prevents infinite growth
+    w_thr = 20.0
+    if 'THROUGHPUT_ABS_WEIGHT' in globals():
+         w_thr = max(globals()['THROUGHPUT_ABS_WEIGHT'], 1.0)
 
-    # p99 없으면 RTT로 대체
-    if not isinstance(p99, (int, float)) or p99 <= 0:
-        # us → ms
-        p99 = (ewma_rtt_us or 0) / 1000.0
+    thr_ref = target
+    r_thr = w_thr * math.log1p(thr / thr_ref)
 
-    # 처리량 못 구하면 현재 rate를 proxy로 써도 됨
-    if thr is None:
-        thr = float(current_rate)
+    # 2) Latency Penalty (Conditional)
+    # Only penalize P99 if we have reached the target throughput (1500)
+    # This encourages the agent to rush to 1500 first.
+    p99 = float(metrics.get("p99_ms") or 0.0)
+    if SLO_p99_ms <= 0: SLO_p99_ms = 1.0
+    
+    r_lat = 0.0
+    if thr >= thr_ref:
+        # Strict penalty if target reached
+        over_slo = max(0.0, p99 - SLO_p99_ms) / SLO_p99_ms
+        r_lat = -10.0 * over_slo
+    else:
+        # Safety net: Penalize if P99 explodes (> 1000ms) even before target
+        # This prevents the agent from destroying the network while chasing throughput
+        SAFETY_P99_MS = 1000.0
+        if p99 > SAFETY_P99_MS:
+             over_safety = (p99 - SAFETY_P99_MS) / SAFETY_P99_MS
+             r_lat = -10.0 * over_safety
 
-    # ------------ 3) 정규화 ------------
-    # latency_norm: 0(매우 좋음) ~ 1 이상(나쁠수록 1에 가까워짐)
-    latency_norm = math.tanh(max(0.0, p99) / lat_scale)
+    # 3) Kernel Signals (Safety Net)
+    # Only penalize if buffer is actually overflowing (> 1.0)
+    r_loss = 0.0 # Loss penalty removed as requested
+    r_q = -20.0 * max(snd_ratio - 1.0, 0.0)
+    r_rtt = 0.0
 
-    # throughput_norm: 0 ~ 1(이상) (높을수록 좋음)
-    throughput_norm = math.tanh(max(0.0, thr) / thr_scale)
-
-    # 큐/버퍼/재전송 penalty 쪽은 그대로 유지
-    snd_pen = math.tanh(max(0.0, snd_ratio - 0.4))   # 0.4 넘는 구간부터 페널티
-    rcv_pen = math.tanh(max(0.0, rcv_ratio - 0.4))
-    retrans_pen = 1.0 if had_retrans else 0.0
-    queue_pen = queue_pressure  # 0~1
-
-    # ------------ 4) 보상 합성 ------------
-    # 가중치는 환경 보면서 튜닝
-    W_THR = 1.0     # 처리량 가중치
-    W_LAT = 4.0     # 지연 가중치
-    W_Q   = 1.0     # 큐/버퍼 압력
-    W_RETX= 0.5
-
-    reward = 0.0
-
-    # 처리량은 높을수록 reward+
-    reward += W_THR * throughput_norm
-
-    # 지연은 낮을수록 reward+, 그래서 -latency_norm
-    reward -= W_LAT * latency_norm
-
-    # 큐/버퍼/재전송 penalty
-    reward -= W_Q * queue_pen
-    reward -= 0.7 * snd_pen
-    reward -= 0.7 * rcv_pen
-    reward -= W_RETX * retrans_pen
-
+    reward = r_thr + r_lat + r_q
     return float(reward)
 
 def log_transition(path, rec):
@@ -559,7 +549,24 @@ class Shield:
         if d_batch > 0:
             new_batch = current_batch + max(1, d_batch)
         elif d_batch < 0:
-            new_batch = current_batch + min(-1, d_batch)
+            # [수정] 배치가 이미 최솟값인데 더 줄이려고 하면 -> 대신 Rate를 줄여준다 (혼잡 완화 유도)
+            if current_batch <= self.b_min:
+                # 배치는 그대로 두고, Rate를 강제 감속 (기존 d_rate보다 더 강력하게)
+                new_batch = current_batch
+                # d_rate가 이미 음수라면 그대로 두고, 양수라면 음수로 뒤집거나 -0.1 정도 추가 감속
+                if d_rate_frac > 0:
+                    d_rate_frac = -0.1
+                else:
+                    d_rate_frac -= 0.1
+                
+                # 재계산된 d_rate_frac으로 new_rate 다시 계산
+                raw_rate = current_rate * (1.0 + d_rate_frac)
+                new_rate = math.floor(raw_rate)
+                if new_rate >= current_rate:
+                    new_rate = current_rate - 1
+                new_rate = clamp(new_rate, self.r_min, self.r_max)
+            else:
+                new_batch = current_batch + min(-1, d_batch)
         else:
             new_batch = current_batch
         new_batch = clamp(new_batch, self.b_min, self.b_max)
@@ -755,9 +762,18 @@ if gym is not None:
             self.interval_s = interval_s
             self.slo_p99_ms = slo_p99_ms
 
-            # Observation = [rtt_norm, snd_norm, rcv_norm, retrans_flag, queue, rate, batch, last_d_rate, last_d_batch, p99_norm]
-            obs_low = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0, -1.0, 0.0], dtype=np.float32)
-            obs_high = np.array([10.0, 1.0, 1.0, 1.0, 1.0, 1.2, 1.0, 1.0, 1.0, 20.0], dtype=np.float32)
+            # Observation = [rtt_norm, snd_norm, rcv_norm, retrans_flag,
+            #                queue, rate, batch, last_d_rate, last_d_batch]
+            obs_low = np.array(
+                [0.0, 0.0, 0.0, 0.0,
+                 0.0, 0.0, 0.0, -1.0, -1.0],
+                dtype=np.float32,
+            )
+            obs_high = np.array(
+                [10.0, 1.0, 1.0, 1.0,
+                 1.0, 1.2, 1.0, 1.0, 1.0],
+                dtype=np.float32,
+            )
             self.observation_space = spaces.Box(low=obs_low, high=obs_high, dtype=np.float32)
 
             # Action = [d_rate_frac in [-0.2,0.2], d_batch_step in {-1,0,1} approximated as [-1,1]]
@@ -783,6 +799,9 @@ if gym is not None:
             self.last_dec_ts = 0.0
             self.last_dec_p99_ms: Optional[float] = None
             self.next_apply_time = 0.0
+            self.p99_hist = deque(maxlen=5)
+            self.stop_active = False
+            self._force_stop_next = False
 
         # Gym interface -------------------------------------------------
         def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None):
@@ -800,6 +819,9 @@ if gym is not None:
             self.last_dec_ts = 0.0
             self.last_dec_p99_ms = None
             self.next_apply_time = 0.0
+            self.p99_hist.clear()
+            self.stop_active = False
+            self._force_stop_next = False
 
             kernel = self._collect_kernel_snapshot()
             obs = make_state(
@@ -831,12 +853,13 @@ if gym is not None:
             global LATEST_METRICS
             if agg_metrics is not None:
                 LATEST_METRICS = agg_metrics
+                self._update_p99_history(LATEST_METRICS.get("p99_ms"))
             else:
                 # 데이터가 안 들어왔으면(통신 두절 등), 0으로 초기화하거나 이전 값 유지
                 # 여기서는 안전하게 0으로 처리
                 pass
             raw_d_rate, raw_d_batch = self._parse_action(action)
-            d_rate_frac = float(clamp(raw_d_rate, -0.2, 0.2))
+            d_rate_frac = float(clamp(raw_d_rate, -MAX_STEP_FRAC, MAX_STEP_FRAC))
             d_batch = int(max(-1, min(1, round(raw_d_batch))))
 
             # policy shields/gates
@@ -847,13 +870,20 @@ if gym is not None:
                 d_rate_frac = 0.0
                 d_batch = 0
 
-            can_apply, new_rate, new_batch = self.shield.clamp(
-                now,
-                self.current_rate,
-                self.current_batch,
-                d_rate_frac,
-                d_batch,
-            )
+            stop_rate = max(0, self.shield.r_min)
+            force_stop = getattr(self, "stop_active", False)
+            if force_stop:
+                can_apply = (self.current_rate != stop_rate)
+                new_rate = stop_rate
+                new_batch = self.current_batch
+            else:
+                can_apply, new_rate, new_batch = self.shield.clamp(
+                    now,
+                    self.current_rate,
+                    self.current_batch,
+                    d_rate_frac,
+                    d_batch,
+                )
 
             applied = False
             applied_cmds = []
@@ -982,70 +1012,141 @@ if gym is not None:
         def _apply_policy_guards(self, d_rate_frac: float, d_batch: int) -> Tuple[float, int]:
             """
             Safety guard in front of Shield.
-            - p99 >= 2*SLO : 강제 -20% 감속, batch 증가는 막음
-            - p99 >= 1*SLO : 최소 -5% 감속, 절대 가속 금지
-            - p99 >= 0.7*SLO : 가속만 막고, batch 증가도 금지
-            - 처리량이 너무 낮으면 감속만 막음 (THROUGHPUT_MIN_FLOOR)
+            1. Hard Brake: P99 > 1000ms or Buffer > 100% -> Force strong deceleration (-0.5)
+            2. Kickstart: Throughput < Floor and Safe -> Force acceleration (+0.05)
             """
 
-            # 1) 최신 메트릭 읽기 (env.step 맨 앞에서 이미 LATEST_METRICS 갱신됨)
+            # 최신 앱 메트릭
             metrics = LATEST_METRICS if isinstance(LATEST_METRICS, dict) else {}
-            p99_now = metrics.get("p99_ms")
-            thr_now = compute_throughput(metrics) if isinstance(metrics, dict) else None
+            thr_now = compute_throughput(metrics) if metrics else 0.0
+            p99 = float(metrics.get("p99_ms") or 0.0)
 
-            # 메트릭이 없으면 그냥 통과
-            if p99_now is None or SLO_P99_MS <= 0:
+            p99_trend_up = self._p99_trending_up()
+            p99_sustain_high = self._p99_sustained_high()
+            self._update_stop_state(p99 if metrics else None)
+            force_stop = getattr(self, "stop_active", False)
+            self._force_stop_next = force_stop
+
+            # 커널 스냅샷
+            k = self._collect_kernel_snapshot()
+            snd_ratio = k.get("snd_ratio", 0.0) or 0.0
+
+            if force_stop:
+                return 0.0, 0
+
+            # 1) Hard Brake (Emergency Stop)
+            if snd_ratio > 1.0:
+                d_rate_frac = min(d_rate_frac, -HARD_DECEL_FRAC)
+                if d_batch > 0: d_batch = 0
                 return d_rate_frac, d_batch
 
-            # 2) 매우 심각한 꼬리: p99 >= 2 * SLO → 강력 브레이크
-            # if p99_now >= 2.0 * SLO_P99_MS:
-            #     # RL이 뭐라 하든 -20% 감속으로 오버라이드
-            #     d_rate_frac = -0.2
-            #     # batch는 최소한 안 늘어나게
-            #     if d_batch > 0:
-            #         d_batch = 0
-            #     return d_rate_frac, d_batch
+            if p99_trend_up and p99 >= P99_TREND_MIN_MS:
+                d_rate_frac = min(d_rate_frac, -HARD_DECEL_FRAC)
+                if d_batch > 0: d_batch = 0
+                return d_rate_frac, d_batch
 
-            # # 3) SLO 초과: 절대 가속 금지 + 최소 -5% 감속
-            # if p99_now >= 1.0 * SLO_P99_MS:
-            #     # 원래 가속하려던 행동이면 0으로, 그마저도 없으면 -0.05로 강제
-            #     if d_rate_frac >= 0.0:
-            #         d_rate_frac = -0.05
-            #     # 꼬리 터진 상태에서 batch 키우는 건 금지
-            #     if d_batch > 0:
-            #         d_batch = 0
-            #     return d_rate_frac, d_batch
+            if p99_sustain_high:
+                clamp_dec = max(P99_SUSTAIN_DECEL_FRAC, 0.01)
+                d_rate_frac = min(d_rate_frac, -clamp_dec)
+                if d_batch > 0:
+                    d_batch = 0
+                return d_rate_frac, d_batch
 
-            # # 4) SLO 근처(70% 이상)에서는 가속만 막기
-            # SAFE_MARGIN = 0.7 * SLO_P99_MS
-            # if p99_now >= SAFE_MARGIN and d_rate_frac > 0.0:
-            #     d_rate_frac = 0.0
-            #     if d_batch > 0:
-            #         d_batch = 0
+            # 상승 추세가 없으면 목표 처리량까지는 가속을 허용
+            try:
+                if thr_now < THROUGHPUT_TARGET and not p99_trend_up:
+                    d_rate_frac = max(d_rate_frac, 0.05)
+                    if d_batch < 0:
+                        d_batch = 0
+            except Exception:
+                pass
 
-            # 5) 처리량 하한선: 너무 낮으면 감속 막기
+            # p99가 연속 상승 중일 때만 완화(감속) 허용
+            if d_rate_frac < 0.0 and not p99_trend_up:
+                d_rate_frac = 0.0
+
+            if p99_trend_up and p99 >= P99_TREND_MIN_MS:
+                kick = -0.05
+                if p99 > max(self.slo_p99_ms, P99_TREND_MIN_MS) * 1.3:
+                    kick = -0.1
+                d_rate_frac = min(d_rate_frac, kick)
+                if d_batch > 0:
+                    d_batch = 0
+
+            # 2) Throughput floor (Kickstart)
+            # If throughput is too low and latency is safe, force acceleration.
             try:
                 if (
-                    thr_now is not None
-                    and THROUGHPUT_MIN_FLOOR > 0.0
+                    THROUGHPUT_MIN_FLOOR > 0.0
                     and thr_now < THROUGHPUT_MIN_FLOOR
-                    and d_rate_frac < 0.0
                 ):
-                    d_rate_frac = 0.0
+                    if p99 < SLO_P99_MS:
+                        # Safe to accelerate
+                        d_rate_frac = max(d_rate_frac, 0.05)
+                    else:
+                        # Unsafe, but don't decelerate too much
+                        d_rate_frac = max(d_rate_frac, 0.0)
             except Exception:
                 pass
 
             return d_rate_frac, d_batch
 
+        def _update_p99_history(self, p99_val: Optional[float]):
+            try:
+                if p99_val is None:
+                    return
+                self.p99_hist.append(float(p99_val))
+            except Exception:
+                pass
+
+        def _update_stop_state(self, p99_val: Optional[float]):
+            try:
+                if self.stop_active:
+                    if p99_val is not None and p99_val <= P99_STOP_RELEASE_MS:
+                        self.stop_active = False
+                else:
+                    if self._p99_should_stop():
+                        self.stop_active = True
+            except Exception:
+                pass
+
+        def _p99_trending_up(self) -> bool:
+            vals = [v for v in self.p99_hist if v is not None]
+            if len(vals) < 3:
+                return False
+            window = vals[-3:]
+            # 3 포인트 모두 지정 임계 이상이면서 일관 상승할 때만 true
+            if any(v < P99_TREND_MIN_MS for v in window):
+                return False
+            deltas = [b - a for a, b in zip(window, window[1:])]
+            min_step = max(5.0, 0.01 * P99_TREND_MIN_MS)
+            return all(d > min_step for d in deltas)
+
+        def _p99_sustained_high(self) -> bool:
+            count = max(1, int(P99_ACCEL_BLOCK_COUNT))
+            vals = [v for v in self.p99_hist if v is not None]
+            if len(vals) < count:
+                return False
+            window = vals[-count:]
+            return all(v is not None and v >= P99_ACCEL_BLOCK_MS for v in window)
+
+        def _p99_should_stop(self) -> bool:
+            vals = [v for v in self.p99_hist if v is not None]
+            count = max(1, int(P99_STOP_COUNT))
+            if len(vals) < count:
+                return False
+            window = vals[-count:]
+            return all(v is not None and v >= P99_STOP_MS for v in window)
+
         def _collect_kernel_snapshot(self) -> dict:
             now = time.time()
             snapshot = {}
-            rtt_ms_list = []
             had_retrans = False
             total_retrans_delta = 0  # 이번 interval의 총 재전송 횟수
             max_retrans_out = 0  # 현재 재전송 대기 큐 최대값
             max_sndbuf = 0
             max_rcvbuf = 0
+            rtt_ms_list = []
 
             if self.b is not None:
                 table = self.b.get_table("stats")
@@ -1089,6 +1190,13 @@ if gym is not None:
                         "rcvbuf": rcvbuf,
                     }
                     _emit(json.dumps(line))
+
+                    # Clear the entry to prevent stale data (Ghost Flows)
+                    # Active flows will be re-created by eBPF on next packet
+                    try:
+                        del table[k]
+                    except Exception:
+                        pass
 
                 self.prev_totals = new_totals
             else:
@@ -1158,7 +1266,7 @@ if gym is not None:
             return self.congested
 
         def _metrics_slice(self) -> dict:
-            keys = ["p50_ms", "p95_ms", "p99_ms", "n", "window_sec", "total_msgs"]
+            keys = ["p50_ms", "p95_ms", "p99_ms", "n", "window_sec", "total_msgs", "thr"]
             return {k: LATEST_METRICS.get(k) for k in keys}
 
         def _compute_reward(self, kernel: dict) -> Optional[float]:
@@ -1175,6 +1283,7 @@ if gym is not None:
                 rcv_ratio=kernel["rcv_ratio"],
                 queue_pressure=kernel["queue_pressure"],
                 had_retrans=kernel["had_retrans"],
+                retrans_count=kernel.get("retrans_count", 0),
                 current_rate=self.current_rate,
                 SLO_p99_ms=self.slo_p99_ms,
             )

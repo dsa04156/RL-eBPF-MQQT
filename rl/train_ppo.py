@@ -12,134 +12,139 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from bcc import BPF
 from torch.distributions import Normal
+from bcc import BPF
 
 # ---------------------------------------------------------------------------
-# eBPF RL 환경 불러오기 (bpf/eda_rl 모듈)
+# 1. 로컬 eda_rl.py 강제 로드 (환경 설정)
 # ---------------------------------------------------------------------------
-REPO_ROOT = Path(__file__).resolve().parents[1]
-EDA_RL_DIR = REPO_ROOT / "bpf" / "eda_rl"
-EDA_LEGACY_DIR = REPO_ROOT / "bpf"
-for path in (EDA_RL_DIR, EDA_LEGACY_DIR):
-    if str(path) not in sys.path:
-        sys.path.append(str(path))
-
-
 def _load_rl_impl():
     import sys
     import importlib
-    from pathlib import Path
     
-    # 1. bpf 디렉토리를 시스템 경로 맨 앞(0번)에 강제 삽입 (최우선 순위 확보)
-    # 현재 파일(train_ppo.py)의 상위 상위 폴더 기준 /bpf
+    # 현재 스크립트(rl/train_ppo.py) 기준 상위 폴더의 bpf/ 경로 찾기
+    # 구조: mqtt-ebpf-edge/
+    #       ├── bpf/
+    #       │   └── eda_rl.py  <-- 이걸 로드해야 함
+    #       └── rl/
+    #           └── train_ppo.py
     bpf_path = str(Path(__file__).resolve().parents[1] / "bpf")
     
-    # 경로 우선순위 조정: bpf 폴더를 맨 위로 올림 (혹시 뒤에 있으면 지우고 앞으로)
-    if bpf_path in sys.path:
+    # 시스템 경로 최우선 순위에 bpf 폴더 추가
+    if bpf_path not in sys.path:
+        sys.path.insert(0, bpf_path)
+    elif sys.path[0] != bpf_path:
         sys.path.remove(bpf_path)
-    sys.path.insert(0, bpf_path)
+        sys.path.insert(0, bpf_path)
 
     try:
-        # 2. eda_rl 모듈 임포트
         import eda_rl
-        
-        # 3. [핵심] 캐시된 구버전이 메모리에 있다면 무시하고, 파일에서 다시 읽어옴 (Reload)
+        # 캐시된 구버전 모듈이 있다면 무시하고 파일에서 새로 읽어옴 (Reload)
         importlib.reload(eda_rl)
-        
-        # 실행 시 터미널에서 어떤 파일을 로드했는지 확인하기 위한 로그
         print(f"[INFO] Force loaded local module: {eda_rl.__file__}")
         
-        # legacy 모드(helper 없음)로 리턴
-        return eda_rl, "legacy", None
-        
+        # gymnasium 설치 여부 확인 (없으면 클래스가 정의되지 않음)
+        if not hasattr(eda_rl, "MQTTRLGymEnv"):
+            raise ImportError("eda_rl.py에서 MQTTRLGymEnv를 찾을 수 없습니다. 'pip install gymnasium'을 하셨나요?")
+            
+        return eda_rl
     except ImportError as e:
-        raise RuntimeError(f"로컬 eda_rl.py를 {bpf_path}에서 찾을 수 없습니다. 에러: {e}")
+        raise RuntimeError(f"로컬 eda_rl.py를 {bpf_path}에서 로드할 수 없습니다.\n원인: {e}")
 
-RL_MODULE, RL_VARIANT, RL_HELPER = _load_rl_impl()
-RL = RL_MODULE
-
+# 모듈 로드
+RL = _load_rl_impl()
 
 def load_bpf_program_legacy():
+    """eda_rl 모듈에 정의된 BPF 프로그램을 컴파일하고 로드"""
     if RL.SKIP_EBPF:
-        RL._emit("[SKIP] eBPF disabled")
+        print("[SKIP] eBPF disabled by env var")
         return None
-
+    
+    # 트래픽 관찰 포트 주입
     program = RL.BPF_PROGRAM.replace("__TRACK_PORT__", str(RL.TRACK_PORT))
-    b = BPF(text=program, debug=0x4)
-    RL._emit(f"[OK] eBPF loaded for port {RL.TRACK_PORT}")
-
+    
+    # BPF 로드 (Root 권한 필요)
+    b = BPF(text=program)
+    
+    # 프로브 부착 (실패 시 경고만 출력하고 진행)
     ok_send = ok_rcv = True
     try:
         b.attach_kprobe(event="tcp_sendmsg", fn_name="on_tcp_sendmsg")
     except Exception as e:
         ok_send = False
-        RL._emit(RL.json.dumps({"warn": "attach_kprobe_sendmsg_failed", "err": str(e)}))
+        print(f"[WARN] attach_kprobe(tcp_sendmsg) failed: {e}")
 
     try:
         b.attach_kprobe(event="tcp_rcv_established", fn_name="on_tcp_rcv_established")
     except Exception as e:
         ok_rcv = False
-        RL._emit(RL.json.dumps({"warn": "attach_kprobe_rcv_failed", "err": str(e)}))
+        print(f"[WARN] attach_kprobe(tcp_rcv_established) failed: {e}")
 
-    RL._emit(RL.json.dumps({"kprobe_sendmsg": ok_send, "kprobe_rcv": ok_rcv}))
+    try:
+        b.attach_tracepoint(tp="tcp:tcp_retransmit_skb", fn_name="trace_retransmit")
+    except Exception:
+        pass # tracepoint는 선택사항
+
+    print(f"[INFO] eBPF Probes attached: send={ok_send}, rcv={ok_rcv}")
     return b
 
-
+# ---------------------------------------------------------------------------
+# 2. PPO 알고리즘 (Network & Trainer)
+# ---------------------------------------------------------------------------
 class ActorCritic(nn.Module):
-    """PPO Actor-Critic 네트워크"""
-
     def __init__(self, state_dim, action_dim, hidden_dim=128):
         super().__init__()
+        # 공통 특징 추출 레이어
         self.shared = nn.Sequential(
             nn.Linear(state_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
         )
+        # Actor (행동 결정): 평균(mean)과 표준편차(std) 출력
         self.actor_mean = nn.Linear(hidden_dim, action_dim)
         self.actor_log_std = nn.Parameter(torch.zeros(action_dim))
+        
+        # Critic (가치 평가): 상태 가치(Value) 출력
         self.critic = nn.Linear(hidden_dim, 1)
 
     def forward(self, state):
         features = self.shared(state)
-        action_mean = self.actor_mean(features)
-        action_std = torch.exp(self.actor_log_std.expand_as(action_mean))
+        mean = self.actor_mean(features)
+        std = torch.exp(self.actor_log_std.expand_as(mean))
         value = self.critic(features)
-        return action_mean, action_std, value
+        return mean, std, value
 
     def get_action(self, state, deterministic=False):
-        action_mean, action_std, value = self.forward(state)
+        """환경 상호작용 시 행동 샘플링"""
+        mean, std, value = self.forward(state)
         value = value.squeeze(-1)
         if deterministic:
-            return action_mean, None, value
-        dist = Normal(action_mean, action_std)
+            return mean, None, value
+        
+        dist = Normal(mean, std)
         action = dist.sample()
+        # 행동 로그 확률 계산 (PPO 업데이트용)
         log_prob = dist.log_prob(action).sum(dim=-1)
         return action, log_prob, value
 
     def evaluate_actions(self, state, action):
-        action_mean, action_std, value = self.forward(state)
-        dist = Normal(action_mean, action_std)
+        """학습 시 행동 평가"""
+        mean, std, value = self.forward(state)
+        dist = Normal(mean, std)
         log_prob = dist.log_prob(action).sum(dim=-1)
         entropy = dist.entropy().sum(dim=-1)
         return log_prob, entropy, value.squeeze(-1)
 
 
 class RolloutBuffer:
-    """온정책 샘플 버퍼"""
-
+    """PPO 학습 데이터를 저장하는 버퍼"""
     def __init__(self, buffer_size, state_dim, action_dim, device):
         self.device = device
         self.buffer_size = buffer_size
-        self.state_dim = state_dim
-        self.action_dim = action_dim
-        self.states = torch.zeros(
-            (buffer_size, state_dim), dtype=torch.float32, device=device
-        )
-        self.actions = torch.zeros(
-            (buffer_size, action_dim), dtype=torch.float32, device=device
-        )
+        # 텐서 사전 할당 (속도 최적화)
+        self.states = torch.zeros((buffer_size, state_dim), dtype=torch.float32, device=device)
+        self.actions = torch.zeros((buffer_size, action_dim), dtype=torch.float32, device=device)
         self.log_probs = torch.zeros(buffer_size, dtype=torch.float32, device=device)
         self.rewards = torch.zeros(buffer_size, dtype=torch.float32, device=device)
         self.dones = torch.zeros(buffer_size, dtype=torch.float32, device=device)
@@ -153,89 +158,51 @@ class RolloutBuffer:
 
     def add(self, state, action, log_prob, reward, done, value):
         if self.ptr >= self.buffer_size:
-            raise RuntimeError("RolloutBuffer capacity exceeded")
-        self.states[self.ptr].copy_(
-            torch.as_tensor(state, dtype=torch.float32, device=self.device)
-        )
-        self.actions[self.ptr].copy_(
-            torch.as_tensor(action, dtype=torch.float32, device=self.device)
-        )
+            raise RuntimeError("RolloutBuffer is full!")
+        self.states[self.ptr] = torch.as_tensor(state, device=self.device)
+        self.actions[self.ptr] = torch.as_tensor(action, device=self.device)
         self.log_probs[self.ptr] = float(log_prob)
         self.rewards[self.ptr] = float(reward)
         self.dones[self.ptr] = float(done)
         self.values[self.ptr] = float(value)
         self.ptr += 1
 
-    @property
-    def full(self):
-        return self.ptr == self.buffer_size
-
-    def set_advantages_returns(self, advantages, returns):
-        if advantages.shape != self.advantages.shape or returns.shape != self.returns.shape:
-            raise ValueError("Shape mismatch when setting advantages/returns")
-        self.advantages.copy_(advantages)
-        self.returns.copy_(returns)
+    def compute_gae_and_returns(self, last_value, gamma, gae_lambda):
+        """GAE(Generalized Advantage Estimation) 계산"""
+        values_ext = torch.cat([self.values, last_value.unsqueeze(0)], dim=0)
+        gae = 0
+        for t in reversed(range(self.buffer_size)):
+            # done이면 다음 가치는 0으로 취급
+            mask = 1.0 - self.dones[t]
+            delta = self.rewards[t] + gamma * values_ext[t+1] * mask - values_ext[t]
+            gae = delta + gamma * gae_lambda * mask * gae
+            self.advantages[t] = gae
+        self.returns = self.advantages + self.values
 
     def iter_minibatches(self, batch_size):
-        if not self.full:
-            raise RuntimeError("Rollout buffer not filled")
         indices = torch.randperm(self.buffer_size, device=self.device)
         for start in range(0, self.buffer_size, batch_size):
             end = start + batch_size
-            batch_idx = indices[start:end]
-            yield (
-                self.states[batch_idx],
-                self.actions[batch_idx],
-                self.log_probs[batch_idx],
-                self.returns[batch_idx],
-                self.advantages[batch_idx],
-            )
+            idx = indices[start:end]
+            yield (self.states[idx], self.actions[idx], self.log_probs[idx], 
+                   self.returns[idx], self.advantages[idx])
 
 
 class PPOTrainer:
-    def __init__(
-        self,
-        state_dim,
-        action_dim,
-        lr=3e-4,
-        gamma=0.99,
-        gae_lambda=0.95,
-        clip_epsilon=0.2,
-        value_coef=0.5,
-        entropy_coef=0.01,
-        max_grad_norm=0.5,
-    ):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = ActorCritic(state_dim, action_dim).to(self.device)
+    def __init__(self, state_dim, action_dim, lr=3e-4, device="cpu"):
+        self.device = device
+        self.model = ActorCritic(state_dim, action_dim).to(device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
-        self.gamma = gamma
-        self.gae_lambda = gae_lambda
-        self.clip_epsilon = clip_epsilon
-        self.value_coef = value_coef
-        self.entropy_coef = entropy_coef
-        self.max_grad_norm = max_grad_norm
+        # PPO 하이퍼파라미터
+        self.clip_epsilon = 0.2
+        self.value_coef = 0.5
+        self.entropy_coef = 0.01
+        self.max_grad_norm = 0.5
 
-    def compute_gae(self, rewards, values, dones, last_value):
-        """Generalized Advantage Estimation with bootstrap value."""
-        values_ext = torch.cat([values, last_value.unsqueeze(0)], dim=0)
-        advantages = torch.zeros_like(rewards, device=self.device)
-        gae = torch.zeros(1, device=self.device)
-        for t in reversed(range(rewards.shape[0])):
-            mask = 1.0 - dones[t]
-            delta = (
-                rewards[t]
-                + self.gamma * values_ext[t + 1] * mask
-                - values_ext[t]
-            )
-            gae = delta + self.gamma * self.gae_lambda * mask * gae
-            advantages[t] = gae
-        returns = advantages + values
-        return advantages, returns
-
-    def update(self, buffer, num_epochs=4, batch_size=256):
-        advantages = buffer.advantages
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-        buffer.advantages.copy_(advantages)
+    def update(self, buffer, num_epochs=4, batch_size=64):
+        # Advantage Normalization (학습 안정성)
+        adv = buffer.advantages
+        buffer.advantages = (adv - adv.mean()) / (adv.std() + 1e-8)
 
         total_policy_loss = 0.0
         total_value_loss = 0.0
@@ -243,38 +210,27 @@ class PPOTrainer:
         num_updates = 0
 
         for _ in range(num_epochs):
-            for (
-                batch_states,
-                batch_actions,
-                batch_old_log_probs,
-                batch_returns,
-                batch_advantages,
-            ) in buffer.iter_minibatches(batch_size):
-                log_probs, entropy, values = self.model.evaluate_actions(
-                    batch_states, batch_actions
-                )
-                ratio = torch.exp(log_probs - batch_old_log_probs)
-                surr1 = ratio * batch_advantages
-                surr2 = torch.clamp(
-                    ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon
-                ) * batch_advantages
-                policy_loss = -torch.min(surr1, surr2).mean()
-
-                value_loss = nn.functional.mse_loss(values, batch_returns)
-                entropy_loss = -entropy.mean()
-                loss = (
-                    policy_loss
-                    + self.value_coef * value_loss
-                    + self.entropy_coef * entropy_loss
-                )
-
+            for s, a, old_log_p, ret, adv in buffer.iter_minibatches(batch_size):
+                log_p, entropy, val = self.model.evaluate_actions(s, a)
+                
+                # PPO Ratio & Clipping
+                ratio = torch.exp(log_p - old_log_p)
+                surr1 = ratio * adv
+                surr2 = torch.clamp(ratio, 1.0 - self.clip_epsilon, 1.0 + self.clip_epsilon) * adv
+                
+                loss_p = -torch.min(surr1, surr2).mean()
+                loss_v = 0.5 * ((val - ret) ** 2).mean()
+                loss_e = -entropy.mean()
+                
+                loss = loss_p + self.value_coef * loss_v + self.entropy_coef * loss_e
+                
                 self.optimizer.zero_grad()
                 loss.backward()
                 nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
                 self.optimizer.step()
 
-                total_policy_loss += policy_loss.item()
-                total_value_loss += value_loss.item()
+                total_policy_loss += loss_p.item()
+                total_value_loss += loss_v.item()
                 total_entropy += entropy.mean().item()
                 num_updates += 1
 
@@ -284,216 +240,207 @@ class PPOTrainer:
             "entropy": total_entropy / max(1, num_updates),
         }
 
-    def save(self, path):
-        """TorchScript로 저장 (추론용)"""
-        self.model.eval()
+    def save_checkpoint(self, path):
+        """재학습용 체크포인트 저장 (.ckpt)"""
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        torch.save({
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+        }, path)
+        print(f"[SAVED] Checkpoint: {path}")
 
+    def load_checkpoint(self, path):
+        """재학습용 체크포인트 로드"""
+        if not os.path.exists(path):
+            print(f"[WARN] Checkpoint file not found: {path}")
+            return
+        checkpoint = torch.load(path, map_location=self.device)
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        print(f"[LOADED] Resumed training from: {path}")
+
+    def save_inference_model(self, path):
+        """실행(Inference)용 경량 모델 저장 (.pt)"""
         class ActorOnly(nn.Module):
-            def __init__(self, actor_critic):
+            def __init__(self, ac):
                 super().__init__()
-                self.shared = actor_critic.shared
-                self.actor_mean = actor_critic.actor_mean
-
+                self.shared = ac.shared
+                self.actor_mean = ac.actor_mean
             def forward(self, x):
-                features = self.shared(x)
-                action_mean = self.actor_mean(features)
-                action_mean = torch.stack(
-                    [
-                        torch.clamp(action_mean[:, 0], -0.25, 0.25),
-                        torch.clamp(action_mean[:, 1], -1.5, 1.5),
-                    ],
-                    dim=1,
-                )
-                return action_mean
-
-        actor_only = ActorOnly(self.model).to(self.device)
-        scripted = torch.jit.script(actor_only)
+                f = self.shared(x)
+                a = self.actor_mean(f)
+                # 출력값 클램핑 (안전장치)
+                # rate: -0.25 ~ 0.25, batch: -1.5 ~ 1.5 (대략 -1, 0, 1)
+                return torch.stack([
+                    torch.clamp(a[:, 0], -0.25, 0.25), 
+                    torch.clamp(a[:, 1], -1.5, 1.5)
+                ], dim=1)
+        
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        self.model.eval()
+        actor = ActorOnly(self.model).to("cpu")
+        # TorchScript로 변환하여 저장 (C++ 등에서도 로드 가능)
+        scripted = torch.jit.script(actor)
         scripted.save(path)
-        print(f"[OK] Saved actor model: {path}")
+        self.model.to(self.device) # 다시 원위치
+        print(f"[SAVED] Inference Model: {path}")
 
 
+# ---------------------------------------------------------------------------
+# 3. 학습 파이프라인 (Environment Build & Loop)
+# ---------------------------------------------------------------------------
 def build_env(env_mode: str, log_path: str):
-    """eBPF + MQTT RL 환경 생성"""
-    if RL_VARIANT == "package":
-        bpf_obj = RL_HELPER.load_bpf_program()
-        mqtt_cli = RL_HELPER.make_mqtt()
-    else:
-        bpf_obj = load_bpf_program_legacy()
-        mqtt_cli = RL.make_mqtt()
-
+    # BPF 및 MQTT 클라이언트 생성
+    bpf_obj = load_bpf_program_legacy()
+    mqtt_cli = RL.make_mqtt()
+    
+    # Shield(안전장치) 생성
     shield = RL.Shield(
-        RL.R_MIN,
-        RL.R_MAX,
-        RL.B_MIN,
-        RL.B_MAX,
-        RL.MAX_STEP_FRAC,
-        RL.COOLDOWN_SEC,
-        RL.MAX_DECEL_FRAC,
-        RL.DECEL_HOLD_SEC,
+        RL.R_MIN, RL.R_MAX, RL.B_MIN, RL.B_MAX, 
+        RL.MAX_STEP_FRAC, RL.COOLDOWN_SEC, RL.MAX_DECEL_FRAC, RL.DECEL_HOLD_SEC
     )
-
+    
+    # Gym 환경 생성
     env_kwargs = dict(
-        bpf_obj=bpf_obj,
-        mqtt_client=mqtt_cli,
-        shield=shield,
-        mode=env_mode,
-        backend="torch",
-        log_path=log_path,
-        interval_s=RL.INTERVAL_S,
-        slo_p99_ms=RL.SLO_P99_MS,
+        bpf_obj=bpf_obj, mqtt_client=mqtt_cli, shield=shield,
+        mode=env_mode, backend="torch", log_path=log_path,
+        interval_s=RL.INTERVAL_S, slo_p99_ms=RL.SLO_P99_MS
     )
-    if RL_VARIANT == "package":
-        env_kwargs["latest_metrics"] = RL_HELPER.LATEST_METRICS
-
+    
+    # eda_rl.py에 정의된 MQTTRLGymEnv 클래스 사용
     env = RL.MQTTRLGymEnv(**env_kwargs)
     return env, bpf_obj, mqtt_cli
 
 
 def cleanup_env(env, bpf_obj, mqtt_cli):
-    if env is not None:
-        try:
-            env.close()
-        except Exception:
-            pass
-    if mqtt_cli is not None:
-        try:
-            mqtt_cli.loop_stop()
-            mqtt_cli.disconnect()
-        except Exception:
-            pass
-    if bpf_obj is not None:
-        try:
-            bpf_obj.cleanup()
-        except Exception:
-            pass
+    """종료 시 리소스 정리"""
+    if env: 
+        try: env.close() 
+        except: pass
+    if mqtt_cli: 
+        try: mqtt_cli.loop_stop(); mqtt_cli.disconnect()
+        except: pass
+    if bpf_obj: 
+        try: bpf_obj.cleanup()
+        except: pass
 
 
 def collect_rollout(env, trainer, buffer, start_obs):
+    """환경과 상호작용하며 데이터 수집 (Rollout)"""
     obs = start_obs
     rollout_rewards = []
+    
     for _ in range(buffer.buffer_size):
-        state_tensor = torch.as_tensor(
-            obs, dtype=torch.float32, device=trainer.device
-        ).unsqueeze(0)
+        # 1. 행동 결정
+        state_t = torch.as_tensor(obs, dtype=torch.float32, device=trainer.device).unsqueeze(0)
         with torch.no_grad():
-            action_tensor, log_prob_tensor, value_tensor = trainer.model.get_action(
-                state_tensor
-            )
-        action = action_tensor.squeeze(0).cpu().numpy()
-        log_prob = log_prob_tensor.squeeze(0).detach()
-        value = value_tensor.squeeze(0).detach()
-
-        next_obs, reward, terminated, truncated, _ = env.step(action)
-        done = terminated or truncated
-        buffer.add(obs, action, log_prob, reward, done, value)
+            action_t, log_prob_t, value_t = trainer.model.get_action(state_t)
+        
+        # 2. 환경에 적용 (Step)
+        action = action_t.cpu().numpy()[0]
+        next_obs, reward, term, trunc, _ = env.step(action)
+        done = term or trunc
+        
+        # 3. 버퍼에 저장
+        buffer.add(obs, action, log_prob_t, reward, done, value_t)
         rollout_rewards.append(reward)
         obs = next_obs
-
-        if done:
+        
+        if done: 
             obs, _ = env.reset()
+
+    # 마지막 상태 가치 계산 (Bootstrapping용)
     with torch.no_grad():
-        _, _, value_tensor = trainer.model.forward(
-            torch.as_tensor(obs, dtype=torch.float32, device=trainer.device).unsqueeze(0)
-        )
-        last_value = value_tensor.squeeze(-1).squeeze(0)
-    return obs, np.mean(rollout_rewards), last_value
+        state_t = torch.as_tensor(obs, dtype=torch.float32, device=trainer.device).unsqueeze(0)
+        _, _, next_val = trainer.model.get_action(state_t)
+        
+    return obs, np.mean(rollout_rewards), next_val.squeeze(0)
 
 
 def train(args):
+    # 1. 환경 및 모델 준비
     env, bpf_obj, mqtt_cli = build_env(args.env_mode, args.log_path)
     obs, _ = env.reset()
 
-    trainer = PPOTrainer(
-        state_dim=env.observation_space.shape[0],
-        action_dim=env.action_space.shape[0],
-        lr=args.lr,
-        gamma=args.gamma,
-        gae_lambda=args.gae_lambda,
-        clip_epsilon=args.clip_epsilon,
-        value_coef=args.value_coef,
-        entropy_coef=args.entropy_coef,
-        max_grad_norm=args.max_grad_norm,
-    )
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    state_dim = env.observation_space.shape[0]
+    action_dim = env.action_space.shape[0]
+    
+    trainer = PPOTrainer(state_dim, action_dim, lr=args.lr, device=device)
 
-    buffer = RolloutBuffer(
-        buffer_size=args.rollout_steps,
-        state_dim=env.observation_space.shape[0],
-        action_dim=env.action_space.shape[0],
-        device=trainer.device,
-    )
+    # 2. 이어하기 (Resume) 확인
+    if args.resume:
+        trainer.load_checkpoint(args.resume)
 
+    buffer = RolloutBuffer(args.rollout_steps, state_dim, action_dim, device)
+    
     total_updates = max(1, args.total_steps // args.rollout_steps)
     best_reward = -float("inf")
     total_steps = 0
 
+    print(f"\n[INFO] Start Training on {device}")
+    print(f"       Total Steps: {args.total_steps}")
+    print(f"       Rollout Steps: {args.rollout_steps}")
+    print(f"       Resume: {args.resume if args.resume else 'No'}")
+    print("---------------------------------------------------------------")
+
     try:
         for update_idx in range(1, total_updates + 1):
             buffer.reset()
+            
+            # 3. 데이터 수집 (Interaction)
+            # 여기서 env.step()이 호출되며 실제 제어가 일어납니다.
             obs, avg_reward, last_value = collect_rollout(env, trainer, buffer, obs)
-            advantages, returns = trainer.compute_gae(
-                buffer.rewards, buffer.values, buffer.dones, last_value
-            )
-            buffer.set_advantages_returns(advantages, returns)
-            metrics = trainer.update(
-                buffer, num_epochs=args.epochs, batch_size=args.batch_size
-            )
+            
+            # 4. 학습 (Update)
+            buffer.compute_gae_and_returns(last_value, args.gamma, args.gae_lambda)
+            metrics = trainer.update(buffer, args.epochs, args.batch_size)
 
             total_steps += buffer.buffer_size
-            print(
-                f"[Update {update_idx}/{total_updates}] "
-                f"steps={total_steps} avg_reward={avg_reward:.3f} "
-                f"policy_loss={metrics['policy_loss']:.4f} "
-                f"value_loss={metrics['value_loss']:.4f} "
-                f"entropy={metrics['entropy']:.4f}"
-            )
+            print(f"[Update {update_idx}/{total_updates}] Step {total_steps}: Avg Reward={avg_reward:.3f} | "
+                  f"Loss(P/V/E)={metrics['policy_loss']:.3f}/{metrics['value_loss']:.3f}/{metrics['entropy']:.3f}")
 
+            # 5. 저장 (Save)
+            if update_idx % args.save_interval == 0:
+                ckpt_path = args.out.replace(".pt", ".ckpt")
+                trainer.save_checkpoint(ckpt_path)
+                trainer.save_inference_model(args.out)
+                
             if avg_reward > best_reward:
                 best_reward = avg_reward
-                trainer.save(args.out)
-            elif args.save_interval > 0 and update_idx % args.save_interval == 0:
-                trainer.save(args.out)
+                # Best 모델 별도 저장 (선택사항)
+                # trainer.save_inference_model(args.out.replace(".pt", "_best.pt"))
+
+    except KeyboardInterrupt:
+        print("\n[STOP] User interrupted training.")
     finally:
         cleanup_env(env, bpf_obj, mqtt_cli)
 
-    print(f"\n[DONE] Total steps: {total_steps}, Best avg reward: {best_reward:.3f}")
-    print(
-        f"→ 온라인 제어 실행 예시: RL_BACKEND=torch RL_MODE=online RL_MODEL_PATH={args.out} python3 bpf/eda_rl.py"
-    )
+    # 종료 전 최종 저장
+    ckpt_path = args.out.replace(".pt", ".ckpt")
+    trainer.save_checkpoint(ckpt_path)
+    trainer.save_inference_model(args.out)
+    print(f"[DONE] Training Finished. Best Reward: {best_reward:.3f}")
 
 
 def parse_args():
-    ap = argparse.ArgumentParser(
-        description=(
-            "실제 MQTT eBPF 환경과 상호작용하는 온정책 PPO 학습기입니다. "
-            "USE_GYM_ENV=1, RL_MODE=online 환경에서 실행해야 합니다."
-        )
-    )
-    ap.add_argument("--out", default="./model_ppo.pt", help="저장할 TorchScript 경로")
-    ap.add_argument("--log_path", default=RL.RL_LOG_PATH, help="Env JSONL 로그")
-    ap.add_argument(
-        "--env_mode",
-        choices=["online", "shadow"],
-        default="online",
-        help="온라인 모드에서만 제어 명령이 실제 적용됩니다.",
-    )
-    ap.add_argument("--total_steps", type=int, default=4096, help="전체 환경 스텝 수")
-    ap.add_argument("--rollout_steps", type=int, default=512, help="업데이트당 샘플 수")
-    ap.add_argument("--epochs", type=int, default=4, help="PPO 업데이트 에폭")
-    ap.add_argument("--batch_size", type=int, default=256, help="미니배치 크기")
-    ap.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
-    ap.add_argument("--gamma", type=float, default=0.99, help="Discount factor")
-    ap.add_argument("--gae_lambda", type=float, default=0.95, help="GAE lambda")
-    ap.add_argument("--clip_epsilon", type=float, default=0.2, help="PPO clip 범위")
-    ap.add_argument("--value_coef", type=float, default=0.5, help="Value loss 계수")
-    ap.add_argument("--entropy_coef", type=float, default=0.01, help="Entropy 계수")
-    ap.add_argument("--max_grad_norm", type=float, default=0.5, help="Gradient clip 한계")
-    ap.add_argument(
-        "--save_interval",
-        type=int,
-        default=5,
-        help="베스트가 아니더라도 N 업데이트마다 주기 저장 (0=비활성)",
-    )
-    ap.add_argument("--seed", type=int, default=42, help="난수 시드")
+    ap = argparse.ArgumentParser(description="PPO Trainer for MQTT-eBPF")
+    ap.add_argument("--out", default="./models/ppo_model.pt", help="Output model path (.pt)")
+    ap.add_argument("--log_path", default=RL.RL_LOG_PATH, help="Training log JSONL path")
+    ap.add_argument("--env_mode", default="online", choices=["online", "shadow"])
+    ap.add_argument("--total_steps", type=int, default=4096)
+    ap.add_argument("--rollout_steps", type=int, default=512)
+    ap.add_argument("--epochs", type=int, default=4)
+    ap.add_argument("--batch_size", type=int, default=64)
+    ap.add_argument("--lr", type=float, default=3e-4)
+    ap.add_argument("--gamma", type=float, default=0.99)
+    ap.add_argument("--gae_lambda", type=float, default=0.95)
+    ap.add_argument("--save_interval", type=int, default=5, help="Save every N updates")
+    ap.add_argument("--seed", type=int, default=42)
+    
+    # [Resume 옵션]
+    ap.add_argument("--resume", type=str, default="", help="Path to .ckpt file to resume training")
+    
     return ap.parse_args()
 
 
@@ -508,26 +455,12 @@ def set_seed(seed: int):
 def main():
     args = parse_args()
     set_seed(args.seed)
-
+    
+    # Root 권한 체크
     if os.geteuid() != 0 and not RL.SKIP_EBPF:
-        print("[WARN] eBPF 로드를 위해 root 권한이 필요할 수 있습니다.")
-
-    if args.rollout_steps <= 0 or args.total_steps <= 0:
-        raise ValueError("rollout_steps 및 total_steps는 양수여야 합니다.")
-    if args.rollout_steps > args.total_steps:
-        raise ValueError("--rollout_steps는 --total_steps 이하여야 합니다.")
-
-    print(
-        f"[INFO] Starting PPO training on device "
-        f"{torch.device('cuda' if torch.cuda.is_available() else 'cpu')}"
-    )
-    print(
-        f"[INFO] env_mode={args.env_mode}, total_steps={args.total_steps}, "
-        f"rollout_steps={args.rollout_steps}, epochs={args.epochs}"
-    )
-
+        print("[WARN] eBPF 로드를 위해 root 권한이 필요할 수 있습니다 (sudo).")
+        
     train(args)
-
 
 if __name__ == "__main__":
     main()

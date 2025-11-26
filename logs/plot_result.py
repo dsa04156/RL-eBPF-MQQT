@@ -6,7 +6,7 @@ import matplotlib
 import matplotlib.font_manager as fm
 import os
 
-LOG_FILE = "logs/ppo_train.jsonl"
+LOG_FILE = "ppo_train.jsonl"  # 현재 디렉토리에 있음
 SLO_MS = 300.0
 TARGET_THR = 50000.0
 
@@ -61,17 +61,23 @@ if not data:
     raise SystemExit(1)
 
 df = pd.DataFrame(data)
+print(f"[INFO] 로드된 샘플 수: {len(df)}")
 
-# ts 기준 상대 시간
+# ts 기준 상대 시간 (분 단위)
 start_ts = df['ts'].iloc[0]
-df['time'] = df['ts'] - start_ts
+df['time_sec'] = df['ts'] - start_ts
+df['time_min'] = df['time_sec'] / 60.0
 
-# metrics / kernel 안전 파싱 (None 방지)
+# 에피소드/스텝 번호
+df['step'] = range(len(df))
+
+# metrics / kernel 안전 파싱
 def safe_get_metrics(row, key, default=0.0):
     m = row.get("metrics", {})
     if not isinstance(m, dict):
         return default
-    return m.get(key, default)
+    val = m.get(key, default)
+    return val if val is not None else default
 
 def safe_get_kernel(row, key, default=0.0):
     k = row.get("kernel", {})
@@ -80,6 +86,8 @@ def safe_get_kernel(row, key, default=0.0):
     return k.get(key, default)
 
 df['p99'] = df.apply(lambda r: safe_get_metrics(r, 'p99_ms', 0.0), axis=1)
+df['p95'] = df.apply(lambda r: safe_get_metrics(r, 'p95_ms', 0.0), axis=1)
+df['p50'] = df.apply(lambda r: safe_get_metrics(r, 'p50_ms', 0.0), axis=1)
 df['n'] = df.apply(lambda r: safe_get_metrics(r, 'n', 0.0), axis=1)
 df['window'] = df.apply(lambda r: safe_get_metrics(r, 'window_sec', 1.0), axis=1)
 df['throughput'] = df.apply(
@@ -87,8 +95,20 @@ df['throughput'] = df.apply(
     axis=1,
 )
 df['snd_ratio'] = df.apply(lambda r: safe_get_kernel(r, 'snd_ratio', 0.0), axis=1)
+df['rtt'] = df.apply(lambda r: safe_get_kernel(r, 'ewma_rtt_us', 0.0) / 1000.0, axis=1)  # ms로 변환
+df['retrans_count'] = df.apply(lambda r: safe_get_kernel(r, 'retrans_count', 0.0), axis=1)
 
-# throttle rate 추출 (cmds에 적용된 값이 있을 때만)
+# Action 추출
+def get_action(row, key):
+    a = row.get('a', {})
+    if not isinstance(a, dict):
+        return 0.0
+    return a.get(key, 0.0)
+
+df['d_rate'] = df.apply(lambda r: get_action(r, 'd_rate'), axis=1)
+df['d_batch'] = df.apply(lambda r: get_action(r, 'd_batch'), axis=1)
+
+# throttle rate 추출
 def get_rate(row):
     if row.get('applied') and row.get('cmds'):
         for c in row['cmds']:
@@ -97,15 +117,21 @@ def get_rate(row):
     return None
 
 df['rate'] = df.apply(get_rate, axis=1)
-# 처음에는 NaN일 수 있으니 앞 방향 채우고, 그래도 없으면 0
 df['rate'] = df['rate'].ffill().fillna(0)
 
-# 보상 smoothing
+# 보상 smoothing (학습 수렴 확인용)
 if 'r' in df.columns:
-    df['reward_smooth'] = df['r'].rolling(window=20, min_periods=1).mean()
+    df['reward_raw'] = df['r']
+    df['reward_smooth'] = df['r'].rolling(window=10, min_periods=1).mean()
+    df['reward_cumsum'] = df['r'].cumsum()
 else:
-    df['r'] = 0.0
+    df['reward_raw'] = 0.0
     df['reward_smooth'] = 0.0
+    df['reward_cumsum'] = 0.0
+
+print(f"[INFO] 시간 범위: {df['time_min'].min():.1f} ~ {df['time_min'].max():.1f} 분")
+print(f"[INFO] 평균 보상: {df['reward_raw'].mean():.3f}")
+print(f"[INFO] 최종 보상 (마지막 10개 평균): {df['reward_raw'].tail(10).mean():.3f}")
 
 # -------------------------------------------------
 # P99 / Throughput 클리핑 + 스무딩을 위한 추가 전처리

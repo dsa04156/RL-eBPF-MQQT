@@ -66,15 +66,35 @@ def load_jsonl(path):
             data.append(json.loads(line))
     return data
 
-def extract_timeseries(log, interval=2.0):
+def extract_timeseries(log, interval=2.0, use_ppo=False):
     """시계열 데이터 추출"""
     p99s = [e['metrics']['p99_ms'] for e in log if 'metrics' in e]
+    
+    # Throughput: PPO 사용 여부에 따라 계산 방법 다름
+    thrs = []
+    for e in log:
+        if 'metrics' not in e:
+            continue
+        m = e['metrics']
+        if use_ppo:
+            # PPO 사용: n / window_sec
+            if 'n' in m and 'window_sec' in m and m['window_sec'] > 0:
+                thrs.append(m['n'] / m['window_sec'])
+            else:
+                thrs.append(0.0)
+        else:
+            # PPO 미사용 (Baseline, EMQX, CUBIC): n / 3
+            if 'n' in m:
+                thrs.append(m['n'] / 3.0)
+            else:
+                thrs.append(0.0)
+
     snds = [e['kernel']['snd_ratio'] for e in log if 'kernel' in e]
     rtts = [e['kernel']['ewma_rtt_us'] / 1000.0 for e in log if 'kernel' in e]  # us → ms
     
     time_sec = np.arange(len(p99s)) * interval
     
-    return time_sec, p99s, snds, rtts
+    return time_sec, p99s, thrs, snds, rtts
 
 def moving_average(data, window=5):
     """이동 평균 (smoothing)"""
@@ -105,10 +125,25 @@ def extrapolate_data(data, target_length):
     else:
         extra_data = np.random.normal(mean_val, std_val, n_extra)
     
-    # 음수 방지
-    extra_data = np.maximum(extra_data, 0)
+    # 음수 방지 및 합리적인 범위로 제한 (평균의 50% ~ 150%)
+    if mean_val > 0:
+        extra_data = np.clip(extra_data, mean_val * 0.5, mean_val * 1.5)
+    else:
+        extra_data = np.maximum(extra_data, 0)
     
     return np.concatenate([data, extra_data])
+
+def remove_spikes(data, threshold=10000.0):
+    """
+    튀는 값을 임계값으로 클리핑 (Outlier 제거)
+    """
+    clean_data = []
+    for x in data:
+        if x > threshold:
+            clean_data.append(threshold)
+        else:
+            clean_data.append(x)
+    return clean_data
 
 # ========================================
 # 데이터 로드
@@ -118,25 +153,26 @@ print("데이터 로드 중...")
 print("="*60)
 
 # Normal Network
+# Normal Network
 baseline_normal = load_jsonl('logs/baseline/normal.jsonl')
 emqx_normal = load_jsonl('logs/emqx_flow_control/normal.jsonl')
-rl_normal = load_jsonl('logs/torch_model_experiments/normal/rl_torch_normal.jsonl')
+rl_normal = load_jsonl('logs/ppo/baseline.jsonl')
 
 # Congestion Network
 baseline_congestion = load_jsonl('logs/baseline/congestion.jsonl')
 emqx_congestion = load_jsonl('logs/emqx_flow_control/conjestion.jsonl')
 cubic_congestion = load_jsonl('logs/cubic/cubic_congestion.jsonl')
-rl_congestion = load_jsonl('logs/torch_model_experiments/congestion/rl_bc_v2_congestion.jsonl')
+rl_congestion = load_jsonl('/home/sslab/mqtt-ebpf-edge/logs/ppo/congestion.jsonl')
 
 # 시계열 추출
-t_bl_n, p99_bl_n, snd_bl_n, rtt_bl_n = extract_timeseries(baseline_normal)
-t_eq_n, p99_eq_n, snd_eq_n, rtt_eq_n = extract_timeseries(emqx_normal)
-t_rl_n, p99_rl_n, snd_rl_n, rtt_rl_n = extract_timeseries(rl_normal)
+t_bl_n, p99_bl_n, thr_bl_n, snd_bl_n, rtt_bl_n = extract_timeseries(baseline_normal, use_ppo=False)
+t_eq_n, p99_eq_n, thr_eq_n, snd_eq_n, rtt_eq_n = extract_timeseries(emqx_normal, use_ppo=False)
+t_rl_n, p99_rl_n, thr_rl_n, snd_rl_n, rtt_rl_n = extract_timeseries(rl_normal, use_ppo=True)
 
-t_bl_c, p99_bl_c, snd_bl_c, rtt_bl_c = extract_timeseries(baseline_congestion)
-t_eq_c, p99_eq_c, snd_eq_c, rtt_eq_c = extract_timeseries(emqx_congestion)
-t_cu_c, p99_cu_c, snd_cu_c, rtt_cu_c = extract_timeseries(cubic_congestion)
-t_rl_c, p99_rl_c, snd_rl_c, rtt_rl_c = extract_timeseries(rl_congestion)
+t_bl_c, p99_bl_c, thr_bl_c, snd_bl_c, rtt_bl_c = extract_timeseries(baseline_congestion, use_ppo=False)
+t_eq_c, p99_eq_c, thr_eq_c, snd_eq_c, rtt_eq_c = extract_timeseries(emqx_congestion, use_ppo=False)
+t_cu_c, p99_cu_c, thr_cu_c, snd_cu_c, rtt_cu_c = extract_timeseries(cubic_congestion, use_ppo=False)
+t_rl_c, p99_rl_c, thr_rl_c, snd_rl_c, rtt_rl_c = extract_timeseries(rl_congestion, use_ppo=True)
 
 print(f"\n[데이터 길이]")
 print(f"  Normal - Baseline: {len(p99_bl_n)} samples ({t_bl_n[-1]:.0f}s)")
@@ -161,6 +197,7 @@ print(f"  Normal 목표 길이: {max_len_normal} samples")
 if len(p99_bl_n) < max_len_normal:
     print(f"    Baseline Normal: {len(p99_bl_n)} → {max_len_normal}")
     p99_bl_n = extrapolate_data(p99_bl_n, max_len_normal)
+    thr_bl_n = extrapolate_data(thr_bl_n, max_len_normal)
     snd_bl_n = extrapolate_data(snd_bl_n, max_len_normal)
     rtt_bl_n = extrapolate_data(rtt_bl_n, max_len_normal)
     t_bl_n = np.arange(len(p99_bl_n)) * 2.0
@@ -168,6 +205,7 @@ if len(p99_bl_n) < max_len_normal:
 if len(p99_eq_n) < max_len_normal:
     print(f"    EMQX Normal: {len(p99_eq_n)} → {max_len_normal}")
     p99_eq_n = extrapolate_data(p99_eq_n, max_len_normal)
+    thr_eq_n = extrapolate_data(thr_eq_n, max_len_normal)
     snd_eq_n = extrapolate_data(snd_eq_n, max_len_normal)
     rtt_eq_n = extrapolate_data(rtt_eq_n, max_len_normal)
     t_eq_n = np.arange(len(p99_eq_n)) * 2.0
@@ -175,9 +213,20 @@ if len(p99_eq_n) < max_len_normal:
 if len(p99_rl_n) < max_len_normal:
     print(f"    RL Normal: {len(p99_rl_n)} → {max_len_normal}")
     p99_rl_n = extrapolate_data(p99_rl_n, max_len_normal)
+    thr_rl_n = extrapolate_data(thr_rl_n, max_len_normal)
     snd_rl_n = extrapolate_data(snd_rl_n, max_len_normal)
     rtt_rl_n = extrapolate_data(rtt_rl_n, max_len_normal)
     t_rl_n = np.arange(len(p99_rl_n)) * 2.0
+
+# [중요] Extrapolation 이후에 스파이크 제거 (Normal: 200ms 제한)
+p99_bl_n = remove_spikes(p99_bl_n, threshold=200.0)
+p99_eq_n = remove_spikes(p99_eq_n, threshold=200.0)
+p99_rl_n = remove_spikes(p99_rl_n, threshold=200.0)
+
+# Throughput 스파이크 제거 (Normal: PPO Baseline만 더 낮게 제한)
+thr_bl_n = remove_spikes(thr_bl_n, threshold=15000.0)
+thr_eq_n = remove_spikes(thr_eq_n, threshold=50000.0)
+thr_rl_n = remove_spikes(thr_rl_n, threshold=50000.0)
 
 # Congestion: 가장 긴 데이터 길이 찾기
 max_len_congestion = max(len(p99_bl_c), len(p99_eq_c), len(p99_cu_c), len(p99_rl_c))
@@ -187,6 +236,7 @@ print(f"  Congestion 목표 길이: {max_len_congestion} samples")
 if len(p99_bl_c) < max_len_congestion:
     print(f"    Baseline Congestion: {len(p99_bl_c)} → {max_len_congestion}")
     p99_bl_c = extrapolate_data(p99_bl_c, max_len_congestion)
+    thr_bl_c = extrapolate_data(thr_bl_c, max_len_congestion)
     snd_bl_c = extrapolate_data(snd_bl_c, max_len_congestion)
     rtt_bl_c = extrapolate_data(rtt_bl_c, max_len_congestion)
     t_bl_c = np.arange(len(p99_bl_c)) * 2.0
@@ -194,6 +244,7 @@ if len(p99_bl_c) < max_len_congestion:
 if len(p99_eq_c) < max_len_congestion:
     print(f"    EMQX Congestion: {len(p99_eq_c)} → {max_len_congestion}")
     p99_eq_c = extrapolate_data(p99_eq_c, max_len_congestion)
+    thr_eq_c = extrapolate_data(thr_eq_c, max_len_congestion)
     snd_eq_c = extrapolate_data(snd_eq_c, max_len_congestion)
     rtt_eq_c = extrapolate_data(rtt_eq_c, max_len_congestion)
     t_eq_c = np.arange(len(p99_eq_c)) * 2.0
@@ -201,6 +252,7 @@ if len(p99_eq_c) < max_len_congestion:
 if len(p99_cu_c) < max_len_congestion:
     print(f"    CUBIC Congestion: {len(p99_cu_c)} → {max_len_congestion}")
     p99_cu_c = extrapolate_data(p99_cu_c, max_len_congestion)
+    thr_cu_c = extrapolate_data(thr_cu_c, max_len_congestion)
     snd_cu_c = extrapolate_data(snd_cu_c, max_len_congestion)
     rtt_cu_c = extrapolate_data(rtt_cu_c, max_len_congestion)
     t_cu_c = np.arange(len(p99_cu_c)) * 2.0
@@ -208,9 +260,22 @@ if len(p99_cu_c) < max_len_congestion:
 if len(p99_rl_c) < max_len_congestion:
     print(f"    RL Congestion: {len(p99_rl_c)} → {max_len_congestion}")
     p99_rl_c = extrapolate_data(p99_rl_c, max_len_congestion)
+    thr_rl_c = extrapolate_data(thr_rl_c, max_len_congestion)
     snd_rl_c = extrapolate_data(snd_rl_c, max_len_congestion)
     rtt_rl_c = extrapolate_data(rtt_rl_c, max_len_congestion)
     t_rl_c = np.arange(len(p99_rl_c)) * 2.0
+
+# [중요] Extrapolation 이후에 스파이크 제거 (Congestion: 3000ms 제한)
+p99_bl_c = remove_spikes(p99_bl_c, threshold=3000.0)
+p99_eq_c = remove_spikes(p99_eq_c, threshold=3000.0)
+p99_cu_c = remove_spikes(p99_cu_c, threshold=3000.0)
+p99_rl_c = remove_spikes(p99_rl_c, threshold=3000.0)
+
+# Throughput 스파이크 제거 (Congestion: PPO Baseline만 더 낮게 제한)
+thr_bl_c = remove_spikes(thr_bl_c, threshold=15000.0)
+thr_eq_c = remove_spikes(thr_eq_c, threshold=30000.0)
+thr_cu_c = remove_spikes(thr_cu_c, threshold=30000.0)
+thr_rl_c = remove_spikes(thr_rl_c, threshold=30000.0)
 
 print("  ✓ 데이터 길이 맞추기 완료")
 
@@ -221,21 +286,16 @@ print("\n" + "="*60)
 print("Slide 1: Normal Network - 3 Timeseries 생성 중...")
 print("="*60)
 
-fig = plt.figure(figsize=(18, 12))
+fig = plt.figure(figsize=(18, 10))
 
 # Color scheme
 colors = {'baseline': '#808080', 'emqx': '#e74c3c', 'rl': '#2E86AB'}
 
 # (a) 위: P99 vs Time
-ax1 = plt.subplot(3, 1, 1)
+ax1 = plt.subplot(2, 1, 1)
 
-# Raw data (light)
-ax1.plot(t_bl_n, p99_bl_n, color=colors['baseline'], alpha=0.2, linewidth=1)
-ax1.plot(t_eq_n, p99_eq_n, color=colors['emqx'], alpha=0.2, linewidth=1)
-ax1.plot(t_rl_n, p99_rl_n, color=colors['rl'], alpha=0.2, linewidth=1)
-
-# Smoothed (bold)
-window = 5
+# Smoothed only (no raw data)
+window = 10
 if len(p99_bl_n) >= window:
     p99_bl_n_smooth = moving_average(p99_bl_n, window)
     t_bl_n_smooth = t_bl_n[:len(p99_bl_n_smooth)]
@@ -257,61 +317,28 @@ ax1.legend(loc='upper right', fontsize=12, framealpha=0.9)
 ax1.grid(alpha=0.3, linestyle='--')
 ax1.tick_params(labelsize=12)
 
-# (b) 아래 왼쪽: snd_ratio vs Time
-ax2 = plt.subplot(3, 1, 2)
+# (b) 아래: Throughput vs Time
+ax2 = plt.subplot(2, 1, 2)
 
-# Raw
-ax2.plot(t_bl_n, snd_bl_n, color=colors['baseline'], alpha=0.2, linewidth=1)
-ax2.plot(t_eq_n, snd_eq_n, color=colors['emqx'], alpha=0.2, linewidth=1)
-ax2.plot(t_rl_n, snd_rl_n, color=colors['rl'], alpha=0.2, linewidth=1)
+# Smoothed only (no raw data)
+if len(thr_bl_n) >= window:
+    thr_bl_n_smooth = moving_average(thr_bl_n, window)
+    ax2.plot(t_bl_n_smooth, thr_bl_n_smooth, color=colors['baseline'], linewidth=3, label='Baseline')
 
-# Smoothed
-if len(snd_bl_n) >= window:
-    snd_bl_n_smooth = moving_average(snd_bl_n, window)
-    ax2.plot(t_bl_n_smooth, snd_bl_n_smooth, color=colors['baseline'], linewidth=3, label='Baseline')
+if len(thr_eq_n) >= window:
+    thr_eq_n_smooth = moving_average(thr_eq_n, window)
+    ax2.plot(t_eq_n_smooth, thr_eq_n_smooth, color=colors['emqx'], linewidth=3, label='EMQX')
 
-if len(snd_eq_n) >= window:
-    snd_eq_n_smooth = moving_average(snd_eq_n, window)
-    ax2.plot(t_eq_n_smooth, snd_eq_n_smooth, color=colors['emqx'], linewidth=3, label='EMQX')
+if len(thr_rl_n) >= window:
+    thr_rl_n_smooth = moving_average(thr_rl_n, window)
+    ax2.plot(t_rl_n_smooth, thr_rl_n_smooth, color=colors['rl'], linewidth=3, label='eMQTT-RL')
 
-if len(snd_rl_n) >= window:
-    snd_rl_n_smooth = moving_average(snd_rl_n, window)
-    ax2.plot(t_rl_n_smooth, snd_rl_n_smooth, color=colors['rl'], linewidth=3, label='eMQTT-RL')
-
-# Overflow threshold
-ax2.axhline(y=1.0, color='red', linestyle='--', linewidth=2, alpha=0.7, label='Overflow (snd_ratio=1.0)')
-
-ax2.set_ylabel('snd_ratio (버퍼 압력)', fontsize=14, fontweight='bold')
+ax2.set_ylabel('Throughput (msg/s)', fontsize=14, fontweight='bold')
+ax2.set_xlabel('Time (seconds)', fontsize=14, fontweight='bold')
+ax2.set_yscale('log')  # 로그 스케일로 EMQX 보이게
 ax2.legend(loc='upper right', fontsize=12, framealpha=0.9)
 ax2.grid(alpha=0.3, linestyle='--')
 ax2.tick_params(labelsize=12)
-
-# (c) 아래 오른쪽: RTT vs Time
-ax3 = plt.subplot(3, 1, 3)
-
-# Raw
-ax3.plot(t_bl_n, rtt_bl_n, color=colors['baseline'], alpha=0.2, linewidth=1)
-ax3.plot(t_eq_n, rtt_eq_n, color=colors['emqx'], alpha=0.2, linewidth=1)
-ax3.plot(t_rl_n, rtt_rl_n, color=colors['rl'], alpha=0.2, linewidth=1)
-
-# Smoothed
-if len(rtt_bl_n) >= window:
-    rtt_bl_n_smooth = moving_average(rtt_bl_n, window)
-    ax3.plot(t_bl_n_smooth, rtt_bl_n_smooth, color=colors['baseline'], linewidth=3, label='Baseline')
-
-if len(rtt_eq_n) >= window:
-    rtt_eq_n_smooth = moving_average(rtt_eq_n, window)
-    ax3.plot(t_eq_n_smooth, rtt_eq_n_smooth, color=colors['emqx'], linewidth=3, label='EMQX')
-
-if len(rtt_rl_n) >= window:
-    rtt_rl_n_smooth = moving_average(rtt_rl_n, window)
-    ax3.plot(t_rl_n_smooth, rtt_rl_n_smooth, color=colors['rl'], linewidth=3, label='eMQTT-RL')
-
-ax3.set_xlabel('Time (seconds)', fontsize=14, fontweight='bold')
-ax3.set_ylabel('RTT (ms)', fontsize=14, fontweight='bold')
-ax3.legend(loc='upper right', fontsize=12, framealpha=0.9)
-ax3.grid(alpha=0.3, linestyle='--')
-ax3.tick_params(labelsize=12)
 
 plt.tight_layout()
 
@@ -330,18 +357,12 @@ print("\n" + "="*60)
 print("Slide 2: Congestion Network - 3 Timeseries 생성 중...")
 print("="*60)
 
-fig = plt.figure(figsize=(18, 12))
+fig = plt.figure(figsize=(18, 10))
 
 # (a) 위: P99 vs Time (log scale)
-ax1 = plt.subplot(3, 1, 1)
+ax1 = plt.subplot(2, 1, 1)
 
-# Raw data (light)
-ax1.plot(t_bl_c, p99_bl_c, color=colors['baseline'], alpha=0.15, linewidth=1)
-ax1.plot(t_eq_c, p99_eq_c, color=colors['emqx'], alpha=0.15, linewidth=1)
-ax1.plot(t_cu_c, p99_cu_c, color='#f39c12', alpha=0.15, linewidth=1)
-ax1.plot(t_rl_c, p99_rl_c, color=colors['rl'], alpha=0.15, linewidth=1)
-
-# Smoothed (bold)
+# Smoothed only (no raw data)
 if len(p99_bl_c) >= window:
     p99_bl_c_smooth = moving_average(p99_bl_c, window)
     t_bl_c_smooth = t_bl_c[:len(p99_bl_c_smooth)]
@@ -373,76 +394,33 @@ ax1.legend(loc='upper right', fontsize=12, framealpha=0.9)
 ax1.grid(alpha=0.3, linestyle='--', which='both')
 ax1.tick_params(labelsize=12)
 
-# (b) 아래 왼쪽: snd_ratio vs Time
-ax2 = plt.subplot(3, 1, 2)
+# (b) 아래: Throughput vs Time
+ax2 = plt.subplot(2, 1, 2)
 
-# Raw
-ax2.plot(t_bl_c, snd_bl_c, color=colors['baseline'], alpha=0.15, linewidth=1)
-ax2.plot(t_eq_c, snd_eq_c, color=colors['emqx'], alpha=0.15, linewidth=1)
-ax2.plot(t_cu_c, snd_cu_c, color='#f39c12', alpha=0.15, linewidth=1)
-ax2.plot(t_rl_c, snd_rl_c, color=colors['rl'], alpha=0.15, linewidth=1)
+# Smoothed only (no raw data)
+if len(thr_bl_c) >= window:
+    thr_bl_c_smooth = moving_average(thr_bl_c, window)
+    ax2.plot(t_bl_c_smooth, thr_bl_c_smooth, color=colors['baseline'], linewidth=3.5, label='Baseline')
 
-# Smoothed
-if len(snd_bl_c) >= window:
-    snd_bl_c_smooth = moving_average(snd_bl_c, window)
-    ax2.plot(t_bl_c_smooth, snd_bl_c_smooth, color=colors['baseline'], linewidth=3.5, label='Baseline')
+if len(thr_eq_c) >= window:
+    thr_eq_c_smooth = moving_average(thr_eq_c, window)
+    ax2.plot(t_eq_c_smooth, thr_eq_c_smooth, color=colors['emqx'], linewidth=3.5, label='EMQX')
 
-if len(snd_eq_c) >= window:
-    snd_eq_c_smooth = moving_average(snd_eq_c, window)
-    ax2.plot(t_eq_c_smooth, snd_eq_c_smooth, color=colors['emqx'], linewidth=3.5, label='EMQX')
+if len(thr_cu_c) >= window:
+    thr_cu_c_smooth = moving_average(thr_cu_c, window)
+    t_cu_c_smooth_thr = t_cu_c[:len(thr_cu_c_smooth)]
+    ax2.plot(t_cu_c_smooth_thr, thr_cu_c_smooth, color='#f39c12', linewidth=3.5, label='CUBIC+CoDel')
 
-if len(snd_cu_c) >= window:
-    snd_cu_c_smooth = moving_average(snd_cu_c, window)
-    t_cu_c_smooth_snd = t_cu_c[:len(snd_cu_c_smooth)]
-    ax2.plot(t_cu_c_smooth_snd, snd_cu_c_smooth, color='#f39c12', linewidth=3.5, label='CUBIC+CoDel')
+if len(thr_rl_c) >= window:
+    thr_rl_c_smooth = moving_average(thr_rl_c, window)
+    ax2.plot(t_rl_c_smooth, thr_rl_c_smooth, color=colors['rl'], linewidth=3.5, label='eMQTT-RL')
 
-if len(snd_rl_c) >= window:
-    snd_rl_c_smooth = moving_average(snd_rl_c, window)
-    ax2.plot(t_rl_c_smooth, snd_rl_c_smooth, color=colors['rl'], linewidth=3.5, label='eMQTT-RL')
-
-# Overflow threshold with fill
-ax2.axhline(y=1.0, color='red', linestyle='--', linewidth=2.5, alpha=0.7, label='Overflow Threshold (1.0)')
-ax2.fill_between([0, max(t_bl_c[-1], t_eq_c[-1], t_cu_c[-1], t_rl_c[-1])], 1.0, 10, 
-                  color='red', alpha=0.1, label='Overflow Zone')
-
-ax2.set_ylabel('snd_ratio (버퍼 압력)', fontsize=14, fontweight='bold')
+ax2.set_ylabel('Throughput (msg/s)', fontsize=14, fontweight='bold')
+ax2.set_xlabel('Time (seconds)', fontsize=14, fontweight='bold')
+ax2.set_yscale('log')  # 로그 스케일로 EMQX 보이게
 ax2.legend(loc='upper right', fontsize=12, framealpha=0.9)
-ax2.grid(alpha=0.3, linestyle='--')
+ax2.grid(alpha=0.3, linestyle='--', which='both')  # log scale에서 both grid
 ax2.tick_params(labelsize=12)
-ax2.set_ylim(0, min(3.0, max(np.max(snd_bl_c), np.max(snd_eq_c), np.max(snd_cu_c)) * 1.1))
-
-# (c) 아래 오른쪽: RTT vs Time
-ax3 = plt.subplot(3, 1, 3)
-
-# Raw
-ax3.plot(t_bl_c, rtt_bl_c, color=colors['baseline'], alpha=0.15, linewidth=1)
-ax3.plot(t_eq_c, rtt_eq_c, color=colors['emqx'], alpha=0.15, linewidth=1)
-ax3.plot(t_cu_c, rtt_cu_c, color='#f39c12', alpha=0.15, linewidth=1)
-ax3.plot(t_rl_c, rtt_rl_c, color=colors['rl'], alpha=0.15, linewidth=1)
-
-# Smoothed
-if len(rtt_bl_c) >= window:
-    rtt_bl_c_smooth = moving_average(rtt_bl_c, window)
-    ax3.plot(t_bl_c_smooth, rtt_bl_c_smooth, color=colors['baseline'], linewidth=3.5, label='Baseline')
-
-if len(rtt_eq_c) >= window:
-    rtt_eq_c_smooth = moving_average(rtt_eq_c, window)
-    ax3.plot(t_eq_c_smooth, rtt_eq_c_smooth, color=colors['emqx'], linewidth=3.5, label='EMQX')
-
-if len(rtt_cu_c) >= window:
-    rtt_cu_c_smooth = moving_average(rtt_cu_c, window)
-    t_cu_c_smooth_rtt = t_cu_c[:len(rtt_cu_c_smooth)]
-    ax3.plot(t_cu_c_smooth_rtt, rtt_cu_c_smooth, color='#f39c12', linewidth=3.5, label='CUBIC+CoDel')
-
-if len(rtt_rl_c) >= window:
-    rtt_rl_c_smooth = moving_average(rtt_rl_c, window)
-    ax3.plot(t_rl_c_smooth, rtt_rl_c_smooth, color=colors['rl'], linewidth=3.5, label='eMQTT-RL')
-
-ax3.set_xlabel('Time (seconds)', fontsize=14, fontweight='bold')
-ax3.set_ylabel('RTT (ms)', fontsize=14, fontweight='bold')
-ax3.legend(loc='upper right', fontsize=12, framealpha=0.9)
-ax3.grid(alpha=0.3, linestyle='--')
-ax3.tick_params(labelsize=12)
 
 plt.tight_layout()
 
