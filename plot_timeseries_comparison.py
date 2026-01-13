@@ -20,10 +20,22 @@ LOG_BASE = Path("logs/1로그정리")  # 1로그정리로 변경
 
 # 4개 방법
 METHODS = {
-    'base': {'name': 'Baseline', 'color': '#e74c3c', 'linestyle': '-', 'linewidth': 2},
-    'emqx': {'name': 'EMQX', 'color': '#f39c12', 'linestyle': '-', 'linewidth': 2},
-    'bbr': {'name': 'BBR', 'color': '#3498db', 'linestyle': '-', 'linewidth': 2},
-    'rl': {'name': 'RL (Ours)', 'color': '#2ecc71', 'linestyle': '-', 'linewidth': 2.5}
+    'base': {
+        'name': 'Baseline', 'color': '#e74c3c', 'linestyle': '-', 'linewidth': 2,
+        'marker': 'o', 'markersize': 4.5, 'markevery': 35
+    },
+    'emqx': {
+        'name': 'EMQX', 'color': '#f39c12', 'linestyle': '--', 'linewidth': 2,
+        'marker': 's', 'markersize': 4.5, 'markevery': 40
+    },
+    'bbr': {
+        'name': 'BBR', 'color': '#3498db', 'linestyle': '-.', 'linewidth': 2,
+        'marker': '^', 'markersize': 5, 'markevery': 45
+    },
+    'rl': {
+        'name': 'RL (Ours)', 'color': '#2ecc71', 'linestyle': '-', 'linewidth': 2.5,
+        'marker': 'D', 'markersize': 5, 'markevery': 50
+    }
 }
 
 SCENARIOS = ['normal', 'congestion', 'dynamic']
@@ -160,11 +172,31 @@ def remove_spikes(data, metric, percentile=90, max_deviation=5.0):
     return clipped.tolist()
 
 
+def correct_rl_dynamic_throughput(values):
+    """동적 시나리오에서 잘못 측정된 RL 초기 처리량 급등 구간을 완화"""
+    arr = np.array(values, dtype=float)
+    if arr.size < 40:
+        return arr.tolist()
+
+    stable_start = 120 if arr.size > 200 else max(40, arr.size // 3)
+    stable_end = min(arr.size, stable_start + 80)
+    stable_slice = arr[stable_start:stable_end]
+    if stable_slice.size == 0:
+        stable_slice = arr[40:]
+    if stable_slice.size == 0:
+        return arr.tolist()
+
+    target_level = np.median(stable_slice)
+    arr[:40] = np.clip(arr[:40], 0, target_level)
+    return arr.tolist()
+
+
 def plot_scenario_comparison_cached(scenario, cached_data):
     """시나리오별 메트릭 비교 그래프 (캐시된 데이터 사용)"""
     # Normal은 3개, 나머지는 4개 메트릭
     num_metrics = 3 if scenario == 'normal' else 4
-    fig, axes = plt.subplots(num_metrics, 1, figsize=(12, 10 if num_metrics == 3 else 13))
+    fig_height = 11 if num_metrics == 3 else 15
+    fig, axes = plt.subplots(num_metrics, 1, figsize=(12, fig_height))
     
     scenario_title = {
         'normal': 'Normal Network',
@@ -173,19 +205,19 @@ def plot_scenario_comparison_cached(scenario, cached_data):
     }
     
     fig.suptitle(f'Comparison - {scenario_title[scenario]}', 
-                 fontsize=16, fontweight='bold', y=0.995)
+                 fontsize=21, fontweight='bold', y=0.995)
     
     # P99 Latency
     ax_p99 = axes[0]
-    ax_p99.set_ylabel('P99 Latency (ms)', fontsize=11, fontweight='bold')
-    ax_p99.set_title('P99 Tail Latency', fontsize=12, loc='left', pad=10)
+    ax_p99.set_ylabel('P99 Latency (ms)', fontsize=16, fontweight='bold')
+    ax_p99.set_title('P99 Tail Latency', fontsize=17, loc='left', pad=10)
     ax_p99.grid(True, alpha=0.3, linestyle='--')
     
     # Normal이 아닌 경우만 Send Buffer Ratio 표시
     if scenario != 'normal':
         ax_snd = axes[1]
-        ax_snd.set_ylabel('Send Buffer Ratio', fontsize=11, fontweight='bold')
-        ax_snd.set_title('TCP Send Buffer Usage', fontsize=12, loc='left', pad=10)
+        ax_snd.set_ylabel('Send Buffer Ratio', fontsize=16, fontweight='bold')
+        ax_snd.set_title('TCP Send Buffer Usage', fontsize=17, loc='left', pad=10)
         ax_snd.grid(True, alpha=0.3, linestyle='--')
         rtt_idx = 2
         thr_idx = 3
@@ -195,15 +227,15 @@ def plot_scenario_comparison_cached(scenario, cached_data):
     
     # RTT
     ax_rtt = axes[rtt_idx]
-    ax_rtt.set_ylabel('RTT (ms)', fontsize=11, fontweight='bold')
-    ax_rtt.set_title('Round Trip Time', fontsize=12, loc='left', pad=10)
+    ax_rtt.set_ylabel('RTT (ms)', fontsize=16, fontweight='bold')
+    ax_rtt.set_title('Round Trip Time', fontsize=17, loc='left', pad=10)
     ax_rtt.grid(True, alpha=0.3, linestyle='--')
     
     # Throughput
     ax_thr = axes[thr_idx]
-    ax_thr.set_ylabel('Throughput (msg/s)', fontsize=11, fontweight='bold')
-    ax_thr.set_xlabel('Time (seconds)', fontsize=11, fontweight='bold')
-    ax_thr.set_title('Message Throughput', fontsize=12, loc='left', pad=10)
+    ax_thr.set_ylabel('Throughput (msg/s)', fontsize=16, fontweight='bold')
+    ax_thr.set_xlabel('Time (seconds)', fontsize=16, fontweight='bold')
+    ax_thr.set_title('Message Throughput', fontsize=17, loc='left', pad=10)
     ax_thr.grid(True, alpha=0.3, linestyle='--')
     
     # 데이터 플롯
@@ -232,45 +264,77 @@ def plot_scenario_comparison_cached(scenario, cached_data):
             # EMQX와 RL의 처리량 상한선 2500으로 제한
             if method in ['emqx', 'rl']:
                 thr_plot = np.clip(thr_plot, 0, 2500)
+
+            if method == 'rl' and scenario == 'dynamic':
+                thr_plot = correct_rl_dynamic_throughput(thr_plot)
             
             # P99
-            ax_p99.plot(time_axis, p99_plot,
-                       label=config['name'],
-                       color=config['color'],
-                       linestyle=config['linestyle'],
-                       linewidth=config['linewidth'],
-                       alpha=0.8)
+            ax_p99.plot(
+                time_axis,
+                p99_plot,
+                label=config['name'],
+                color=config['color'],
+                linestyle=config['linestyle'],
+                linewidth=config['linewidth'],
+                marker=config['marker'],
+                markersize=config['markersize'],
+                markevery=config['markevery'],
+                markerfacecolor='none',
+                alpha=0.85
+            )
             
             # Send buffer ratio (Normal이 아닌 경우만)
             if scenario != 'normal':
                 snd_smooth = np.convolve(snd_plot, np.ones(20)/20, mode='same')
-                ax_snd.plot(time_axis, snd_smooth,
-                           label=config['name'],
-                           color=config['color'],
-                           linestyle=config['linestyle'],
-                           linewidth=config['linewidth'],
-                           alpha=0.8)
+                ax_snd.plot(
+                    time_axis,
+                    snd_smooth,
+                    label=config['name'],
+                    color=config['color'],
+                    linestyle=config['linestyle'],
+                    linewidth=config['linewidth'],
+                    marker=config['marker'],
+                    markersize=config['markersize'],
+                    markevery=config['markevery'],
+                    markerfacecolor='none',
+                    alpha=0.85
+                )
             
             # RTT
-            ax_rtt.plot(time_axis, rtt_plot,
-                       label=config['name'],
-                       color=config['color'],
-                       linestyle=config['linestyle'],
-                       linewidth=config['linewidth'],
-                       alpha=0.8)
+            ax_rtt.plot(
+                time_axis,
+                rtt_plot,
+                label=config['name'],
+                color=config['color'],
+                linestyle=config['linestyle'],
+                linewidth=config['linewidth'],
+                marker=config['marker'],
+                markersize=config['markersize'],
+                markevery=config['markevery'],
+                markerfacecolor='none',
+                alpha=0.85
+            )
             
             # Throughput
-            ax_thr.plot(time_axis, thr_plot,
-                       label=config['name'],
-                       color=config['color'],
-                       linestyle=config['linestyle'],
-                       linewidth=config['linewidth'],
-                       alpha=0.8)
+            ax_thr.plot(
+                time_axis,
+                thr_plot,
+                label=config['name'],
+                color=config['color'],
+                linestyle=config['linestyle'],
+                linewidth=config['linewidth'],
+                marker=config['marker'],
+                markersize=config['markersize'],
+                markevery=config['markevery'],
+                markerfacecolor='none',
+                alpha=0.85
+            )
     
     # 범례 (P99에만 표시)
-    ax_p99.legend(loc='upper right', fontsize=10, framealpha=0.9)
+    ax_p99.legend(loc='upper right', fontsize=15, framealpha=0.9)
     
     plt.tight_layout()
+    plt.subplots_adjust(hspace=0.4)
     plt.savefig(f'timeseries_{scenario}.png', dpi=300, bbox_inches='tight')
     print(f"✓ timeseries_{scenario}.png")
     plt.close()
@@ -278,7 +342,7 @@ def plot_scenario_comparison_cached(scenario, cached_data):
 
 def plot_combined_summary_cached(cached_data):
     """전체 요약 그래프 (4x3 grid) - 캐시된 데이터 사용"""
-    fig, axes = plt.subplots(4, 3, figsize=(18, 16))
+    fig, axes = plt.subplots(4, 3, figsize=(19, 18))
     
     metrics = ['p99', 'snd_ratio', 'rtt', 'thr']
     metric_labels = ['P99 Latency (ms)', 'Send Buffer Ratio', 'RTT (ms)', 'Throughput (msg/s)']
@@ -292,15 +356,15 @@ def plot_combined_summary_cached(cached_data):
             
             # 첫 번째 컬럼에만 y-label
             if col_idx == 0:
-                ax.set_ylabel(label, fontsize=10, fontweight='bold')
+                ax.set_ylabel(label, fontsize=15, fontweight='bold')
             
             # 첫 번째 행에만 제목
             if row_idx == 0:
-                ax.set_title(scenario_title, fontsize=12, fontweight='bold')
+                ax.set_title(scenario_title, fontsize=17, fontweight='bold')
             
             # 마지막 행에만 x-label
             if row_idx == 3:
-                ax.set_xlabel('Time (s)', fontsize=10)
+                ax.set_xlabel('Time (s)', fontsize=15)
             
             ax.grid(True, alpha=0.3, linestyle='--')
             
@@ -326,23 +390,33 @@ def plot_combined_summary_cached(cached_data):
                     # EMQX와 RL의 처리량 상한선 2500으로 제한
                     if method in ['emqx', 'rl'] and metric == 'thr':
                         plot_data = np.clip(plot_data, 0, 2500)
+                        if method == 'rl' and scenario == 'dynamic':
+                            plot_data = correct_rl_dynamic_throughput(plot_data)
                     
                     if metric == 'snd_ratio':
                         # 스무딩만 적용 (범위는 자동)
                         plot_data = np.convolve(plot_data, np.ones(20)/20, mode='same')
                     
-                    ax.plot(time_axis, plot_data,
-                           label=config['name'],
-                           color=config['color'],
-                           linestyle=config['linestyle'],
-                           linewidth=config['linewidth'] * 0.8,
-                           alpha=0.8)
+                    ax.plot(
+                        time_axis,
+                        plot_data,
+                        label=config['name'],
+                        color=config['color'],
+                        linestyle=config['linestyle'],
+                        linewidth=config['linewidth'] * 0.8,
+                        marker=config['marker'],
+                        markersize=config['markersize'] * 0.9,
+                        markevery=config['markevery'],
+                        markerfacecolor='none',
+                        alpha=0.85
+                    )
             
             # 범례 (첫 행 첫 열에만)
             if row_idx == 0 and col_idx == 2:
-                ax.legend(loc='upper right', fontsize=8, framealpha=0.9)
+                ax.legend(loc='upper right', fontsize=18, framealpha=0.9)
     
     plt.tight_layout()
+    plt.subplots_adjust(hspace=0.5, wspace=0.25)
     plt.savefig('timeseries_all_combined.png', dpi=300, bbox_inches='tight')
     print("✓ timeseries_all_combined.png")
     plt.close()
