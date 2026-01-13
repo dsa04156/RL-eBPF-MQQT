@@ -1,0 +1,32 @@
+version: "3.8"
+services:
+  publisher:
+    build:
+      context: .                # 빌드 컨텍스트 디렉터리
+      dockerfile: Dockerfile_hedging  # 커스텀 Docker
+    environment:
+      BROKER: "192.168.0.1"       # EMQX 호스트 IP
+      PORT: "23232"               # EMQX 리스너 포트
+      TOPIC_DATA: "bench/foo1"
+      TOPIC_CTRL: "control/room1"
+      RATE: "10"
+      BATCH: "1"
+      QOS: "1"                    # Hedging은 QoS=1에서만 의미 있음
+      PAYLOAD_BYTES: "0"
+
+      # --- Hedging ---
+      HEDGE_DELAY_MS: "120"       # PUBACK이 120ms 내 안 오면 동일 payload 1회 재발행
+
+      # --- (옵션) Backoff 함께 쓰고 싶을 때 주석 해제 ---
+      # ACK_TIMEOUT_MS: "120"     # ACK 타임아웃 기준(헤지 딜레이와 동일 추천)
+      # BACKOFF_MS: "100"         # 타임아웃 발생 시 잠깐 쉬는 시간(ms)
+      # BACKOFF_COOLDOWN_MS: "600" # backoff를 너무 자주 하지 않도록 쿨다운(ms)
+
+      # USERNAME: "emqx_user"     # 인증 필요시
+      # PASSWORD: "emqx_pass"
+
+    # network_mode: "host"
+    # environment:
+    #   BROKER: "127.0.0.1"
+    restart: unless-stopped
+

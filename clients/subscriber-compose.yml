@@ -1,0 +1,17 @@
+version: "3.8"
+services:
+  subscriber:
+    build: .
+    environment:
+      BROKER: "192.168.0.1"
+      PORT: "23232"
+      TOPIC_DATA: "bench/foo1"
+      KEEPALIVE: "60"
+    volumes:
+      - ./results:/logs
+    restart: unless-stopped
+    # 필요시 네트워크 모드 직접 지정
+    # network_mode: "host"
+    # environment:
+    #   BROKER: "127.0.0.1"
+

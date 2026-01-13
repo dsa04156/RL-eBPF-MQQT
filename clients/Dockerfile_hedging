@@ -1,0 +1,7 @@
+FROM python:3.11-slim
+WORKDIR /app
+COPY publisher_hedging.py /app/publisher.py
+RUN pip install --no-cache-dir paho-mqtt==1.6.1
+ENV PYTHONUNBUFFERED=1
+CMD ["python","-u","/app/publisher.py"]
+

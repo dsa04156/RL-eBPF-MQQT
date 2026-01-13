@@ -1,0 +1,21 @@
+version: "3.8"
+services:
+  publisher:
+    build: .
+    environment:
+      BROKER: "192.168.0.1"       # EMQX 호스트 IP
+      PORT: "23232"               # EMQX 리스너 포트
+      TOPIC_DATA: "bench/foo1"
+      TOPIC_CTRL: "control/room1"
+      RATE: "10"
+      BATCH: "1"
+      QOS: "1"
+      PAYLOAD_BYTES: "0"
+      # USERNAME: "emqx_user"     # 인증 필요시
+      # PASSWORD: "emqx_pass"
+    # 만약 같은 호스트의 네트워크 문제 의심되면 아래 사용
+    # network_mode: "host"
+    # environment:
+    #   BROKER: "127.0.0.1"
+    restart: unless-stopped
+
